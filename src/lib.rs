@@ -1,3 +1,7 @@
+//! # Features
+//! `web3_`: Implements `GasPriceEstimating` for `Web3`.
+
+#[cfg(feature = "web3_")]
 mod eth_node;
 mod ethgasstation;
 mod gasnow;

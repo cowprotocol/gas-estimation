@@ -9,12 +9,15 @@ async-trait = "0.1"
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_with = "1.6"
-web3 = { version = "0.13", default-features = false }
-primitive-types = { version = "0.7.3", features = ["fp-conversion"] }
+web3 = { version = "0.15", default-features = false, optional = true }
+primitive-types = { version = "0.8", features = ["fp-conversion"], optional = true }
+
+[features]
+web3_ = ["web3", "primitive-types"]
 
 [dev-dependencies]
 assert_approx_eq = "1.1"
 futures = "0.3"
 isahc = { version = "0.9", features = ["json"] }
-mockall = "0.8"
+mockall = "0.9"
 serde_json = "1.0"
