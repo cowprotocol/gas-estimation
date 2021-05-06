@@ -35,13 +35,13 @@ pub trait GasPriceEstimating: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait Transport: Send + Sync {
-    async fn get_json<'a, T: DeserializeOwned>(&self, url: &'a str) -> Result<T>;
+    async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use isahc::{http::uri::Uri, ResponseExt};
+    use isahc::{http::uri::Uri, AsyncReadResponseExt};
     use std::{future::Future, str::FromStr};
 
     #[derive(Default)]
@@ -49,8 +49,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Transport for TestTransport {
-        async fn get_json<'a, T: DeserializeOwned>(&self, url: &'a str) -> Result<T> {
-            let json: String = isahc::get_async(Uri::from_str(url)?).await?.text()?;
+        async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T> {
+            let json: String = isahc::get_async(Uri::from_str(url)?).await?.text().await?;
             Ok(serde_json::from_str(&json)?)
         }
     }
