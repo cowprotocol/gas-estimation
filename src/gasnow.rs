@@ -66,14 +66,24 @@ impl<T: Transport> GasNowGasStation<T> {
     where
         Fut: Future<Output = Result<Response>>,
     {
+        // It is possible that while we wait to get the lock here another thread inserts a new cache
+        // entry in which case the cache time can be in the future from now. So we have to use
+        // checked_duration_since to catch this.
         let mut lock = self.last_response.lock().await;
         match lock.as_ref() {
-            Some(cached) if now.duration_since(cached.time) < RATE_LIMIT => match cached.data {
-                Some(response) => Ok(response),
-                None => Err(anyhow!(
-                    "previous response was error and cache has not yet expired"
-                )),
-            },
+            Some(cached)
+                if now
+                    .checked_duration_since(cached.time)
+                    .unwrap_or_else(|| Duration::from_secs(0))
+                    < RATE_LIMIT =>
+            {
+                match cached.data {
+                    Some(response) => Ok(response),
+                    None => Err(anyhow!(
+                        "previous response was error and cache has not yet expired"
+                    )),
+                }
+            }
             _ => {
                 let result = fetch().await;
                 *lock = Some(CachedResponse {
@@ -107,6 +117,8 @@ impl<T: Transport> GasPriceEstimating for GasNowGasStation<T> {
 
 #[cfg(test)]
 mod tests {
+    use futures::FutureExt;
+
     use super::super::tests::{FutureWaitExt as _, TestTransport};
     use super::*;
     use std::future::{ready, Pending};
@@ -174,6 +186,21 @@ mod tests {
             .gas_price_with_cache(now, panic_future)
             .wait()
             .is_err());
+    }
+
+    #[test]
+    fn does_not_panic_if_now_is_old() {
+        let gasnow = GasNowGasStation::new(TestTransport::default());
+        let now = Instant::now();
+        *gasnow.last_response.lock().now_or_never().unwrap() = Some(CachedResponse {
+            time: now + Duration::from_secs(1),
+            data: None,
+        });
+        gasnow
+            .gas_price_with_cache(now, panic_future)
+            .now_or_never()
+            .unwrap()
+            .unwrap_err();
     }
 
     // cargo test gasnow -- --ignored --nocapture
