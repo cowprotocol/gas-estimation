@@ -1,7 +1,7 @@
 //! Ethereum node `GasPriceEstimating` implementation.
 
 use super::GasPriceEstimating;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use primitive_types::U256;
 use std::time::Duration;
 use web3::{Transport, Web3};
@@ -16,7 +16,7 @@ where
         self.eth()
             .gas_price()
             .await
-            .map_err(From::from)
+            .context("failed to get web3 gas price")
             .map(U256::to_f64_lossy)
     }
 }

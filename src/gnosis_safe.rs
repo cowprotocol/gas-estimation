@@ -2,7 +2,7 @@
 //! Api documentation at https://safe-relay.gnosis.io/ .
 
 use super::{linear_interpolation, GasPriceEstimating, Transport};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use serde_with::rust::display_fromstr;
 use std::{convert::TryInto, time::Duration};
@@ -78,7 +78,10 @@ impl<T: Transport> GnosisSafeGasStation<T> {
 
     /// Retrieves the current gas prices from the gas station.
     pub async fn gas_prices(&self) -> Result<GasPrices> {
-        self.transport.get_json(&self.uri).await
+        self.transport
+            .get_json(&self.uri)
+            .await
+            .context("failed to get gnosissafe gas price")
     }
 }
 

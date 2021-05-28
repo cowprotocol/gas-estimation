@@ -1,5 +1,5 @@
 use super::{linear_interpolation, GasPriceEstimating, Transport};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use futures::lock::Mutex;
 use std::{
     convert::TryInto,
@@ -53,7 +53,10 @@ impl<T: Transport> GasNowGasStation<T> {
     }
 
     async fn gas_price_without_cache(&self) -> Result<Response> {
-        self.transport.get_json(API_URI).await
+        self.transport
+            .get_json(API_URI)
+            .await
+            .context("failed to get gasnow gas price")
     }
 
     // Ensures that no requests are made faster than the rate limit by caching the previous
@@ -80,7 +83,7 @@ impl<T: Transport> GasNowGasStation<T> {
                 match cached.data {
                     Some(response) => Ok(response),
                     None => Err(anyhow!(
-                        "previous response was error and cache has not yet expired"
+                        "previous gasnow response was error and cache has not yet expired"
                     )),
                 }
             }

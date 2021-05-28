@@ -1,5 +1,5 @@
 use super::{linear_interpolation, GasPriceEstimating, Transport};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::{convert::TryInto, time::Duration};
 
 // Gas price estimation with https://ethgasstation.info/ , api https://docs.ethgasstation.info/gas-price .
@@ -31,7 +31,10 @@ impl<T: Transport> EthGasStation<T> {
     }
 
     async fn gas_price(&self) -> Result<Response> {
-        self.transport.get_json(API_URI).await
+        self.transport
+            .get_json(API_URI)
+            .await
+            .context("failed to get ethgasstation gas price")
     }
 }
 
