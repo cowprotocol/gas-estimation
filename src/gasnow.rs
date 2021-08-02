@@ -25,24 +25,41 @@ struct CachedResponse {
 }
 
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize, PartialEq)]
-struct Response {
-    code: u32,
-    data: ResponseData,
+pub struct Response {
+    pub code: u32,
+    pub data: ResponseData,
 }
 
 // gas prices in wei
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize, PartialEq)]
-struct ResponseData {
-    rapid: f64,
-    fast: f64,
-    standard: f64,
-    slow: f64,
+pub struct ResponseData {
+    pub rapid: f64,
+    pub fast: f64,
+    pub standard: f64,
+    pub slow: f64,
 }
 
-const RAPID: Duration = Duration::from_secs(15);
-const FAST: Duration = Duration::from_secs(60);
-const STANDARD: Duration = Duration::from_secs(300);
-const SLOW: Duration = Duration::from_secs(600);
+pub const RAPID: Duration = Duration::from_secs(15);
+pub const FAST: Duration = Duration::from_secs(60);
+pub const STANDARD: Duration = Duration::from_secs(300);
+pub const SLOW: Duration = Duration::from_secs(600);
+
+pub fn estimate_with_limits(
+    _gas_limit: f64,
+    time_limit: Duration,
+    response: &ResponseData,
+) -> Result<f64> {
+    let points: &[(f64, f64)] = &[
+        (RAPID.as_secs_f64(), response.rapid),
+        (FAST.as_secs_f64(), response.fast),
+        (STANDARD.as_secs_f64(), response.standard),
+        (SLOW.as_secs_f64(), response.slow),
+    ];
+    Ok(linear_interpolation::interpolate(
+        time_limit.as_secs_f64(),
+        points.try_into()?,
+    ))
+}
 
 impl<T: Transport> GasNowGasStation<T> {
     pub fn new(transport: T) -> Self {
@@ -101,20 +118,12 @@ impl<T: Transport> GasNowGasStation<T> {
 
 #[async_trait::async_trait]
 impl<T: Transport> GasPriceEstimating for GasNowGasStation<T> {
-    async fn estimate_with_limits(&self, _gas_limit: f64, time_limit: Duration) -> Result<f64> {
+    async fn estimate_with_limits(&self, gas_limit: f64, time_limit: Duration) -> Result<f64> {
         let response = self
             .gas_price_with_cache(Instant::now(), || self.gas_price_without_cache())
             .await?
             .data;
-        let points: &[(f64, f64)] = &[
-            (RAPID.as_secs_f64(), response.rapid),
-            (FAST.as_secs_f64(), response.fast),
-            (STANDARD.as_secs_f64(), response.standard),
-            (SLOW.as_secs_f64(), response.slow),
-        ];
-        let result =
-            linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?);
-        Ok(result)
+        estimate_with_limits(gas_limit, time_limit, &response)
     }
 }
 
@@ -128,6 +137,18 @@ mod tests {
 
     fn panic_future() -> Pending<Result<Response>> {
         panic!()
+    }
+
+    #[test]
+    fn interpolates() {
+        let data = ResponseData {
+            rapid: 4.0,
+            fast: 3.0,
+            standard: 2.0,
+            slow: 1.0,
+        };
+        let result = estimate_with_limits(0., Duration::from_secs(20), &data).unwrap();
+        assert!(result > 3.0 && result < 4.0);
     }
 
     #[test]

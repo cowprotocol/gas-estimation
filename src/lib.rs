@@ -2,15 +2,19 @@
 //! `web3_`: Implements `GasPriceEstimating` for `Web3`.
 
 #[cfg(feature = "web3_")]
-mod eth_node;
-mod ethgasstation;
-mod gasnow;
-mod gnosis_safe;
+pub mod eth_node;
+pub mod ethgasstation;
+pub mod gasnow;
+#[cfg(feature = "tokio_")]
+pub mod gasnow_websocket;
+pub mod gnosis_safe;
 mod linear_interpolation;
-mod priority;
+pub mod priority;
 
 pub use ethgasstation::EthGasStation;
 pub use gasnow::GasNowGasStation;
+#[cfg(feature = "tokio_")]
+pub use gasnow_websocket::GasNowWebSocketGasStation;
 pub use gnosis_safe::GnosisSafeGasStation;
 pub use priority::PriorityGasPriceEstimating;
 
