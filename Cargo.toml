@@ -16,7 +16,7 @@ tokio = { version = "1.9", features = ["sync", "time"], optional = true }
 tokio-tungstenite = { version = "0.15", features = ["native-tls"], optional = true }
 tracing = "0.1"
 url = "2.0"
-web3 = { version = "0.16", default-features = false, optional = true }
+web3 = { version = "0.17", default-features = false, optional = true }
 
 [features]
 tokio_ = ["tokio", "tokio-tungstenite"]
