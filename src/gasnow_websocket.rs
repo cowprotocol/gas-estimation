@@ -33,6 +33,7 @@ impl GasNowWebSocketGasStation {
             DEFAULT_URL.parse().unwrap(),
             RECONNECT_INTERVAL,
             sender,
+            max_update_age,
         ));
         Self {
             max_update_age,
@@ -76,15 +77,17 @@ enum JsonMessage {
 }
 
 /// Exits when all receivers have been dropped.
-/// Automatically reconnects the websocket.
+/// Automatically reconnects the websocket on errors or if no message has been received within
+/// max_update_interval.
 async fn receive_forever(
     api: Url,
     reconnect_interval: Duration,
     sender: watch::Sender<Option<(Instant, ResponseData)>>,
+    max_update_interval: Duration,
 ) {
     let work = async {
         loop {
-            connect_and_receive_until_error(&api, &sender).await;
+            connect_and_receive_until_error(&api, &sender, max_update_interval).await;
             tokio::time::sleep(reconnect_interval).await;
         }
     };
@@ -95,27 +98,45 @@ async fn receive_forever(
     tracing::debug!("exiting because all receivers have been dropped");
 }
 
-/// Returns on first error.
+/// Returns on first error or if no message is received within max_update_interval.
 async fn connect_and_receive_until_error(
     api: &Url,
     sender: &watch::Sender<Option<(Instant, ResponseData)>>,
+    max_update_interval: Duration,
 ) {
-    let (mut stream, _) = match tokio_tungstenite::connect_async(api).await {
-        Ok(result) => result,
-        Err(err) => {
+    let (mut stream, _) = match tokio::time::timeout(
+        max_update_interval,
+        tokio_tungstenite::connect_async(api),
+    )
+    .await
+    {
+        Err(_) => {
+            tracing::error!("websocket connect timed out");
+            return;
+        }
+        Ok(Err(err)) => {
             tracing::error!(?err, "websocket connect failed");
             return;
         }
+        Ok(Ok(result)) => result,
     };
-    while let Some(item) = stream.next().await {
-        let message = match item {
-            Ok(message) => message,
-            // It is unclear which errors exactly cause the websocket to become unusable so we stop
-            // on any.
-            Err(err) => {
-                tracing::error!(?err, "websocket failed");
+    loop {
+        let message = match tokio::time::timeout(max_update_interval, stream.next()).await {
+            Err(_) => {
+                tracing::error!("websocket stream timed out");
                 return;
             }
+            Ok(None) => {
+                tracing::warn!("websocket stream closed");
+                return;
+            }
+            // It is unclear which errors exactly cause the websocket to become unusable so we stop
+            // on any.
+            Ok(Some(Err(err))) => {
+                tracing::error!(?err, "websocket stream failed");
+                return;
+            }
+            Ok(Some(Ok(message))) => message,
         };
         let json_message: Result<JsonMessage, _> = match &message {
             Message::Text(text) => serde_json::from_str(text),
