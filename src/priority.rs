@@ -48,9 +48,9 @@ impl PriorityGasPriceEstimating {
                 Err(err) => {
                     let num_errors = estimator.errors_in_a_row.fetch_add(1, Ordering::SeqCst) + 1;
                     if num_errors < LOG_ERROR_AFTER_N_ERRORS {
-                        log::warn!("gas estimator {} failed: {:?}", i, err);
+                        tracing::warn!("gas estimator {} failed: {:?}", i, err);
                     } else {
-                        log::error!("gas estimator {} failed: {:?}", i, err);
+                        tracing::error!("gas estimator {} failed: {:?}", i, err);
                     }
                 }
             }

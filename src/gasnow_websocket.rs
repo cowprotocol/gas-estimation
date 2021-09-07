@@ -5,9 +5,12 @@ use crate::{
 use anyhow::{bail, ensure, Result};
 use futures::StreamExt;
 use serde_json::Value;
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::watch;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{error::Error as TungsteniteError, Message};
 use url::Url;
 
 pub const DEFAULT_URL: &str = "wss://www.gasnow.org/ws/gasprice";
@@ -28,12 +31,20 @@ pub struct GasNowWebSocketGasStation {
 
 impl GasNowWebSocketGasStation {
     pub fn new(max_update_age: Duration) -> Self {
+        Self::with_error_reporter(max_update_age, LogErrorReporter)
+    }
+
+    pub fn with_error_reporter(
+        max_update_age: Duration,
+        error_reporter: impl ErrorReporting,
+    ) -> Self {
         let (sender, receiver) = watch::channel(None);
         tokio::spawn(receive_forever(
             DEFAULT_URL.parse().unwrap(),
             RECONNECT_INTERVAL,
             sender,
             max_update_age,
+            Arc::new(error_reporter),
         ));
         Self {
             max_update_age,
@@ -84,10 +95,17 @@ async fn receive_forever(
     reconnect_interval: Duration,
     sender: watch::Sender<Option<(Instant, ResponseData)>>,
     max_update_interval: Duration,
+    error_reporter: Arc<dyn ErrorReporting>,
 ) {
     let work = async {
         loop {
-            connect_and_receive_until_error(&api, &sender, max_update_interval).await;
+            connect_and_receive_until_error(
+                &api,
+                &sender,
+                max_update_interval,
+                error_reporter.clone(),
+            )
+            .await;
             tokio::time::sleep(reconnect_interval).await;
         }
     };
@@ -103,6 +121,7 @@ async fn connect_and_receive_until_error(
     api: &Url,
     sender: &watch::Sender<Option<(Instant, ResponseData)>>,
     max_update_interval: Duration,
+    error_reporter: Arc<dyn ErrorReporting>,
 ) {
     let (mut stream, _) = match tokio::time::timeout(
         max_update_interval,
@@ -111,11 +130,11 @@ async fn connect_and_receive_until_error(
     .await
     {
         Err(_) => {
-            tracing::error!("websocket connect timed out");
+            error_reporter.report_error(Error::ConnectionTimeOut);
             return;
         }
         Ok(Err(err)) => {
-            tracing::error!(?err, "websocket connect failed");
+            error_reporter.report_error(Error::ConnectionFailure(err));
             return;
         }
         Ok(Ok(result)) => result,
@@ -123,17 +142,17 @@ async fn connect_and_receive_until_error(
     loop {
         let message = match tokio::time::timeout(max_update_interval, stream.next()).await {
             Err(_) => {
-                tracing::error!("websocket stream timed out");
+                error_reporter.report_error(Error::StreamTimeOut);
                 return;
             }
             Ok(None) => {
-                tracing::warn!("websocket stream closed");
+                tracing::info!("websocket stream closed");
                 return;
             }
             // It is unclear which errors exactly cause the websocket to become unusable so we stop
             // on any.
             Ok(Some(Err(err))) => {
-                tracing::error!(?err, "websocket stream failed");
+                error_reporter.report_error(Error::StreamFailure(err));
                 return;
             }
             Ok(Some(Ok(message))) => message,
@@ -151,7 +170,7 @@ async fn connect_and_receive_until_error(
                     Message::Binary(binary) => String::from_utf8_lossy(&binary).into_owned(),
                     _ => unreachable!(),
                 };
-                tracing::error!(?err, ?msg, "decode failed");
+                error_reporter.report_error(Error::JsonDecodeFailed(msg, err));
                 continue;
             }
         };
@@ -162,6 +181,50 @@ async fn connect_and_receive_until_error(
             }
             JsonMessage::Other(value) => {
                 tracing::warn!(?value, "received unexpected message");
+            }
+        }
+    }
+}
+
+/// A trait for configuring error reporting for the WebSocket gas estimator.
+pub trait ErrorReporting: Send + Sync + 'static {
+    fn report_error(&self, err: Error);
+}
+
+/// A possible error to be reported.
+pub enum Error {
+    /// The WebSocket timed out establishing a connection to the remote service.
+    ConnectionTimeOut,
+    /// An unexpected error occured connecting to the remote service.
+    ConnectionFailure(TungsteniteError),
+    /// The WebSocket message stream timed out.
+    StreamTimeOut,
+    /// An unexpected error occured reading the WebSocket message stream.
+    StreamFailure(TungsteniteError),
+    /// An error occured decoding the JSON gas update data.
+    JsonDecodeFailed(String, serde_json::Error),
+}
+
+/// The default error reporter that just logs the errors.
+pub struct LogErrorReporter;
+
+impl ErrorReporting for LogErrorReporter {
+    fn report_error(&self, err: Error) {
+        match err {
+            Error::ConnectionTimeOut => {
+                tracing::warn!("websocket connect timed out");
+            }
+            Error::ConnectionFailure(err) => {
+                tracing::warn!(?err, "websocket connect failed");
+            }
+            Error::StreamTimeOut => {
+                tracing::warn!("websocket stream timed out");
+            }
+            Error::StreamFailure(err) => {
+                tracing::warn!(?err, "websocket stream failed");
+            }
+            Error::JsonDecodeFailed(msg, err) => {
+                tracing::warn!(?err, ?msg, "decode failed");
             }
         }
     }
