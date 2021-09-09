@@ -79,7 +79,7 @@ impl<T: Transport> GnosisSafeGasStation<T> {
     /// Retrieves the current gas prices from the gas station.
     pub async fn gas_prices(&self) -> Result<GasPrices> {
         self.transport
-            .get_json(&self.uri)
+            .get_json(&self.uri, None)
             .await
             .context("failed to get gnosissafe gas price")
     }

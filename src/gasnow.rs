@@ -71,7 +71,7 @@ impl<T: Transport> GasNowGasStation<T> {
 
     async fn gas_price_without_cache(&self) -> Result<Response> {
         self.transport
-            .get_json(API_URI)
+            .get_json(API_URI, None)
             .await
             .context("failed to get gasnow gas price")
     }
