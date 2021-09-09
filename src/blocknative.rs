@@ -1,18 +1,24 @@
-use super::{GasPriceEstimating, Transport};
+use super::{linear_interpolation, GasPriceEstimating, Transport};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::time::Duration;
+use std::{convert::TryInto, time::Duration};
 
 // Gas price estimation with https://www.blocknative.com/gas-estimator , api https://docs.blocknative.com/gas-platform#example-request .
 
 const API_URI: &str = "https://api.blocknative.com/gasprices/blockprices";
+
+const PERCENT_99: Duration = Duration::from_secs(15);
+const PERCENT_95: Duration = Duration::from_secs(23);
+const PERCENT_90: Duration = Duration::from_secs(30);
+const PERCENT_80: Duration = Duration::from_secs(40);
+const PERCENT_70: Duration = Duration::from_secs(50);
 
 pub struct BlockNative<T> {
     transport: T,
     api_key: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 struct EstimatedPrice {
     confidence: u64,
@@ -21,13 +27,13 @@ struct EstimatedPrice {
     max_fee_per_gas: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct BlockPrice {
     estimated_prices: Vec<EstimatedPrice>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Response {
     block_prices: Vec<BlockPrice>,
@@ -48,15 +54,49 @@ impl<T: Transport> BlockNative<T> {
 
 #[async_trait::async_trait]
 impl<T: Transport> GasPriceEstimating for BlockNative<T> {
-    async fn estimate_with_limits(&self, _gas_limit: f64, _time_limit: Duration) -> Result<f64> {
+    async fn estimate_with_limits(&self, _gas_limit: f64, time_limit: Duration) -> Result<f64> {
         let response = self.gas_price().await?;
-        if let Some(block) = response.block_prices.first() {
-            if let Some(estimated_price) = block.estimated_prices.first() {
-                return Ok(estimated_price.price);
-            }
-        }
-        return Err(anyhow!("invalid response from blocknative"));
+        estimate_with_limits(time_limit, response)
     }
+}
+
+fn estimate_with_limits(time_limit: Duration, mut response: Response) -> Result<f64> {
+    if let Some(block) = response.block_prices.first_mut() {
+        //need to sort by confidence since Blocknative API does not guarantee sorted response
+        block
+            .estimated_prices
+            .sort_by(|a, b| a.confidence.cmp(&b.confidence));
+
+        let points: &[(f64, f64)] = &[
+            (
+                PERCENT_99.as_secs_f64(),
+                block.estimated_prices.pop().unwrap_or_default().price,
+            ),
+            (
+                PERCENT_95.as_secs_f64(),
+                block.estimated_prices.pop().unwrap_or_default().price,
+            ),
+            (
+                PERCENT_90.as_secs_f64(),
+                block.estimated_prices.pop().unwrap_or_default().price,
+            ),
+            (
+                PERCENT_80.as_secs_f64(),
+                block.estimated_prices.pop().unwrap_or_default().price,
+            ),
+            (
+                PERCENT_70.as_secs_f64(),
+                block.estimated_prices.pop().unwrap_or_default().price,
+            ),
+        ];
+
+        return Ok(linear_interpolation::interpolate(
+            time_limit.as_secs_f64(),
+            points.try_into()?,
+        ));
+    }
+
+    return Err(anyhow!("invalid response from blocknative"));
 }
 
 #[cfg(test)]
@@ -76,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_response() {
+    fn estimate_with_limits_test() {
         let json = json!({
           "system": "ethereum",
           "network": "main",
@@ -124,6 +164,17 @@ mod tests {
             }
           ]
         });
-        let _response: Response = serde_json::from_value(json).unwrap();
+        let response: Response = serde_json::from_value(json).unwrap();
+
+        let price = estimate_with_limits(Duration::from_secs(10), response.clone()).unwrap();
+        assert_eq!(price, 104.0);
+        let price = estimate_with_limits(Duration::from_secs(20), response.clone()).unwrap();
+        assert_eq!(price, 100.875);
+        let price = estimate_with_limits(Duration::from_secs(35), response.clone()).unwrap();
+        assert_eq!(price, 97.5);
+        let price = estimate_with_limits(Duration::from_secs(45), response.clone()).unwrap();
+        assert_eq!(price, 96.5);
+        let price = estimate_with_limits(Duration::from_secs(55), response).unwrap();
+        assert_eq!(price, 96.0);
     }
 }
