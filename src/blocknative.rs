@@ -15,7 +15,7 @@ const PERCENT_70: Duration = Duration::from_secs(50);
 
 pub struct BlockNative<T> {
     transport: T,
-    api_key: String,
+    header: http::header::HeaderMap,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -40,13 +40,13 @@ struct Response {
 }
 
 impl<T: Transport> BlockNative<T> {
-    pub fn new(transport: T, api_key: String) -> Self {
-        Self { transport, api_key }
+    pub fn new(transport: T, header: http::header::HeaderMap) -> Self {
+        Self { transport, header }
     }
 
     async fn gas_price(&self) -> Result<Response> {
         self.transport
-            .get_json(API_URI, Some(self.api_key.clone()))
+            .get_json(API_URI, self.header.clone())
             .await
             .context("failed to get blocknative gas price")
     }
@@ -101,18 +101,21 @@ fn estimate_with_limits(time_limit: Duration, mut response: Response) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{FutureWaitExt as _, TestTransport};
+    use super::super::tests::TestTransport;
     use super::*;
     use serde_json::json;
 
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn real_request() {
-        let blocknative = BlockNative::new(
-            TestTransport::default(),
-            std::env::var("BLOCKNATIVE_API_KEY").unwrap(), //or replace with api_key
+    async fn real_request() {
+        let mut header = http::header::HeaderMap::new();
+        header.insert(
+            "AUTHORIZATION",
+            http::header::HeaderValue::from_str(&std::env::var("BLOCKNATIVE_API_KEY").unwrap())
+                .unwrap(), //or replace with api_key
         );
-        let _response = blocknative.gas_price().wait().unwrap();
+        let blocknative = BlockNative::new(TestTransport::default(), header);
+        let _response = blocknative.gas_price().await;
     }
 
     #[test]

@@ -40,14 +40,17 @@ pub trait GasPriceEstimating: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait Transport: Send + Sync {
-    async fn get_json<T: DeserializeOwned>(&self, url: &str, api_key: Option<String>) -> Result<T>;
+    async fn get_json<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        header: http::header::HeaderMap,
+    ) -> Result<T>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use isahc::{http::uri::Uri, AsyncReadResponseExt};
-    use std::{future::Future, str::FromStr};
+    use std::future::Future;
 
     #[derive(Default)]
     pub struct TestTransport {}
@@ -57,13 +60,15 @@ mod tests {
         async fn get_json<T: DeserializeOwned>(
             &self,
             url: &str,
-            api_key: Option<String>,
+            header: http::header::HeaderMap,
         ) -> Result<T> {
-            let request = isahc::Request::get(Uri::from_str(url)?)
-                .header("AUTHORIZATION", api_key.unwrap_or_default())
-                .body(())
-                .unwrap();
-            let json = isahc::send_async(request).await?.text().await?;
+            let json = reqwest::Client::new()
+                .get(url)
+                .headers(header)
+                .send()
+                .await?
+                .text()
+                .await?;
 
             Ok(serde_json::from_str(&json)?)
         }
