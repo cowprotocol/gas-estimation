@@ -1,4 +1,4 @@
-use super::{linear_interpolation, GasPriceEstimating, Transport};
+use super::{linear_interpolation, CachedResponse, GasPriceEstimating, Transport};
 use anyhow::{anyhow, Context, Result};
 use futures::lock::Mutex;
 use std::{
@@ -14,14 +14,7 @@ const RATE_LIMIT: Duration = Duration::from_secs(15);
 
 pub struct GasNowGasStation<T> {
     transport: T,
-    last_response: Mutex<Option<CachedResponse>>,
-}
-
-struct CachedResponse {
-    // The time at which the request was sent.
-    time: Instant,
-    // The result of the last response. Error isn't Clone so we store None in the error case.
-    data: Option<Response>,
+    last_response: Mutex<Option<CachedResponse<Response>>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize, PartialEq)]

@@ -1,6 +1,7 @@
 //! # Features
 //! `web3_`: Implements `GasPriceEstimating` for `Web3`.
 
+//#[cfg(feature = "tokio_")]
 pub mod blocknative;
 #[cfg(feature = "web3_")]
 pub mod eth_node;
@@ -21,7 +22,7 @@ pub use priority::PriorityGasPriceEstimating;
 
 use anyhow::Result;
 use serde::de::DeserializeOwned;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_GAS_LIMIT: f64 = 21000.0;
 pub const DEFAULT_TIME_LIMIT: Duration = Duration::from_secs(30);
@@ -45,6 +46,16 @@ pub trait Transport: Send + Sync {
         url: &str,
         header: http::header::HeaderMap,
     ) -> Result<T>;
+}
+
+/// Used for rate limit implementation. If requests are received at a higher rate then Gas price estimators
+/// can handle, we need to have a cached value that will be returned instead of error.
+#[derive(Debug)]
+pub struct CachedResponse<T> {
+    // The time at which the request was sent.
+    time: Instant,
+    // The result of the last response. Error isn't Clone so we store None in the error case.
+    data: Option<T>,
 }
 
 #[cfg(test)]

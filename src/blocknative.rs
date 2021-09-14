@@ -1,49 +1,51 @@
 use super::{linear_interpolation, GasPriceEstimating, Transport};
+use crate::CachedResponse;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::{convert::TryInto, time::Duration};
+use std::{
+    convert::TryInto,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::{
+    sync::Mutex,
+    task::{self, JoinHandle},
+};
 
 // Gas price estimation with https://www.blocknative.com/gas-estimator , api https://docs.blocknative.com/gas-platform#example-request .
 
 const API_URI: &str = "https://api.blocknative.com/gasprices/blockprices";
 
-const PERCENT_99: Duration = Duration::from_secs(15);
-const PERCENT_95: Duration = Duration::from_secs(23);
-const PERCENT_90: Duration = Duration::from_secs(30);
-const PERCENT_80: Duration = Duration::from_secs(40);
-const PERCENT_70: Duration = Duration::from_secs(50);
-
-pub struct BlockNative<T> {
-    transport: T,
-    header: http::header::HeaderMap,
-}
+const TIME_PER_BLOCK: Duration = Duration::from_secs(15);
+const RATE_LIMIT: u64 = 10;
 
 #[derive(Debug, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 struct EstimatedPrice {
-    confidence: u64,
+    confidence: f64,
     price: f64,
     max_priority_fee_per_gas: f64,
     max_fee_per_gas: f64,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 struct BlockPrice {
     estimated_prices: Vec<EstimatedPrice>,
 }
 
-#[derive(Debug, serde::Deserialize, Clone)]
+#[derive(Debug, serde::Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 struct Response {
     block_prices: Vec<BlockPrice>,
 }
 
-impl<T: Transport> BlockNative<T> {
-    pub fn new(transport: T, header: http::header::HeaderMap) -> Self {
-        Self { transport, header }
-    }
+struct Request<T> {
+    transport: T,
+    header: http::header::HeaderMap,
+}
 
+impl<T: Transport> Request<T> {
     async fn gas_price(&self) -> Result<Response> {
         self.transport
             .get_json(API_URI, self.header.clone())
@@ -52,10 +54,54 @@ impl<T: Transport> BlockNative<T> {
     }
 }
 
+pub struct BlockNative {
+    cached_response: Arc<Mutex<Option<CachedResponse<Response>>>>,
+    handle: JoinHandle<()>,
+}
+
+impl Drop for BlockNative {
+    fn drop(&mut self) {
+        self.handle.abort();
+        self.cached_response = Arc::default();
+    }
+}
+
+impl BlockNative {
+    pub fn new<T: Transport + 'static>(transport: T, header: http::header::HeaderMap) -> Self {
+        let cached_response: Arc<Mutex<Option<CachedResponse<Response>>>> = Default::default();
+        let cached_response_clone = cached_response.clone();
+
+        //spawn task for updating the cached response
+        let handle = task::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(RATE_LIMIT));
+            let request = Request { transport, header };
+            loop {
+                interval.tick().await;
+                if let Ok(response) = request.gas_price().await {
+                    let mut data = cached_response_clone.lock().await;
+                    *data = Some(CachedResponse {
+                        time: Instant::now(),
+                        data: Some(response),
+                    });
+                }
+            }
+        });
+
+        Self {
+            cached_response,
+            handle,
+        }
+    }
+}
+
 #[async_trait::async_trait]
-impl<T: Transport> GasPriceEstimating for BlockNative<T> {
+impl GasPriceEstimating for BlockNative {
     async fn estimate_with_limits(&self, _gas_limit: f64, time_limit: Duration) -> Result<f64> {
-        let response = self.gas_price().await?;
+        let response = match self.cached_response.lock().await.as_ref() {
+            Some(data) => data.data.clone().unwrap_or_default(),
+            None => Default::default(),
+        };
+
         estimate_with_limits(time_limit, response)
     }
 }
@@ -65,38 +111,27 @@ fn estimate_with_limits(time_limit: Duration, mut response: Response) -> Result<
         //need to sort by confidence since Blocknative API does not guarantee sorted response
         block
             .estimated_prices
-            .sort_by(|a, b| a.confidence.cmp(&b.confidence));
+            .sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap()); //change to total_cmp when stable
 
-        let points: &[(f64, f64)] = &[
-            (
-                PERCENT_99.as_secs_f64(),
-                block.estimated_prices.pop().unwrap_or_default().price,
-            ),
-            (
-                PERCENT_95.as_secs_f64(),
-                block.estimated_prices.pop().unwrap_or_default().price,
-            ),
-            (
-                PERCENT_90.as_secs_f64(),
-                block.estimated_prices.pop().unwrap_or_default().price,
-            ),
-            (
-                PERCENT_80.as_secs_f64(),
-                block.estimated_prices.pop().unwrap_or_default().price,
-            ),
-            (
-                PERCENT_70.as_secs_f64(),
-                block.estimated_prices.pop().unwrap_or_default().price,
-            ),
-        ];
+        //if confidence is 90%, point is calculated as 15s / (90% / 100%)
+        let points = block
+            .estimated_prices
+            .iter()
+            .map(|estimated_price| {
+                (
+                    TIME_PER_BLOCK.as_secs_f64() / (estimated_price.confidence / 100.0),
+                    estimated_price.price,
+                )
+            })
+            .collect::<Vec<(f64, f64)>>();
 
         return Ok(linear_interpolation::interpolate(
             time_limit.as_secs_f64(),
-            points.try_into()?,
+            points.as_slice().try_into()?,
         ));
     }
 
-    return Err(anyhow!("invalid response from blocknative"));
+    return Err(anyhow!("no valid response exist"));
 }
 
 #[cfg(test)]
@@ -108,14 +143,35 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn real_request() {
-        let mut header = http::header::HeaderMap::new();
-        header.insert(
-            "AUTHORIZATION",
-            http::header::HeaderValue::from_str(&std::env::var("BLOCKNATIVE_API_KEY").unwrap())
-                .unwrap(), //or replace with api_key
-        );
-        let blocknative = BlockNative::new(TestTransport::default(), header);
-        let _response = blocknative.gas_price().await;
+        {
+            let mut header = http::header::HeaderMap::new();
+            header.insert(
+                "AUTHORIZATION",
+                http::header::HeaderValue::from_str(&std::env::var("BLOCKNATIVE_API_KEY").unwrap())
+                    .unwrap(), //or replace with api_key
+            );
+
+            let blocknative = BlockNative::new(TestTransport::default(), header);
+
+            let mut interval = tokio::time::interval(Duration::from_secs(3));
+            for _ in 0..9 {
+                interval.tick().await;
+
+                let res = blocknative
+                    .estimate_with_limits(0.0, Duration::from_secs(20))
+                    .await
+                    .unwrap_or_default();
+                println!("res {}", res);
+            }
+        }
+
+        //expect blocknative resources are dropped
+
+        let mut interval = tokio::time::interval(Duration::from_secs(2));
+        for i in 0..29 {
+            interval.tick().await;
+            println!("test {}", i);
+        }
     }
 
     #[test]
@@ -171,13 +227,13 @@ mod tests {
 
         let price = estimate_with_limits(Duration::from_secs(10), response.clone()).unwrap();
         assert_eq!(price, 104.0);
-        let price = estimate_with_limits(Duration::from_secs(20), response.clone()).unwrap();
-        assert_eq!(price, 100.875);
-        let price = estimate_with_limits(Duration::from_secs(35), response.clone()).unwrap();
-        assert_eq!(price, 97.5);
-        let price = estimate_with_limits(Duration::from_secs(45), response.clone()).unwrap();
-        assert_eq!(price, 96.5);
-        let price = estimate_with_limits(Duration::from_secs(55), response).unwrap();
+        let price = estimate_with_limits(Duration::from_secs(16), response.clone()).unwrap();
+        assert_eq!(price, 98.76);
+        let price = estimate_with_limits(Duration::from_secs(17), response.clone()).unwrap();
+        assert_eq!(price, 97.84);
+        let price = estimate_with_limits(Duration::from_secs(19), response.clone()).unwrap();
+        assert_eq!(price, 96.90666666666667);
+        let price = estimate_with_limits(Duration::from_secs(25), response).unwrap();
         assert_eq!(price, 96.0);
     }
 }
