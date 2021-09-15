@@ -4,13 +4,10 @@ use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::{
     convert::TryInto,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::{
-    sync::Mutex,
-    task::{self, JoinHandle},
-};
+use tokio::task::{self, JoinHandle};
 
 // Gas price estimation with https://www.blocknative.com/gas-estimator , api https://docs.blocknative.com/gas-platform#example-request .
 
@@ -18,6 +15,7 @@ const API_URI: &str = "https://api.blocknative.com/gasprices/blockprices";
 
 const TIME_PER_BLOCK: Duration = Duration::from_secs(15);
 const RATE_LIMIT: Duration = Duration::from_secs(10);
+const CACHED_RESPONSE_VALIDITY: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -55,58 +53,99 @@ impl<T: Transport> Request<T> {
 }
 
 pub struct BlockNative {
-    cached_response: Arc<Mutex<Option<CachedResponse<Response>>>>,
+    cached_response: Arc<Mutex<CachedResponse<Response>>>,
     handle: JoinHandle<()>,
 }
 
 impl Drop for BlockNative {
     fn drop(&mut self) {
         self.handle.abort();
-        self.cached_response = Arc::default();
+        self.cached_response = Default::default();
     }
 }
 
 impl BlockNative {
-    pub fn new<T: Transport + 'static>(transport: T, header: http::header::HeaderMap) -> Self {
-        let cached_response: Arc<Mutex<Option<CachedResponse<Response>>>> = Default::default();
+    pub async fn new<T: Transport + 'static>(
+        transport: T,
+        header: http::header::HeaderMap,
+    ) -> Result<Self> {
+        let cached_response: Arc<Mutex<CachedResponse<Response>>> = Default::default();
         let cached_response_clone = cached_response.clone();
 
-        //spawn task for updating the cached response
-        let handle = task::spawn(async move {
-            let request = Request { transport, header };
-            loop {
-                if let Ok(response) = request.gas_price().await {
-                    let mut data = cached_response_clone.lock().await;
-                    *data = Some(CachedResponse {
+        //send one request to initially populate the cached response
+        let request = Request { transport, header };
+        match request.gas_price().await {
+            Ok(response) => match cached_response_clone.lock() {
+                Ok(mut data) => {
+                    *data = CachedResponse {
                         time: Instant::now(),
                         data: Some(response),
-                    });
+                    };
+                }
+                Err(e) => {
+                    tracing::warn!(?e, "failed to obtain lock on cached response");
+                    return Err(anyhow!("failed to obtain lock on cached response"));
+                }
+            },
+            Err(e) => {
+                tracing::warn!(?e, "failed to get initial response from blocknative");
+                return Err(anyhow!("failed to get initial response from blocknative"));
+            }
+        }
+
+        //spawn task for updating the cached response every RATE_LIMIT seconds
+        let handle = task::spawn(async move {
+            loop {
+                match request.gas_price().await {
+                    Ok(response) => match cached_response_clone.lock() {
+                        Ok(mut data) => {
+                            *data = CachedResponse {
+                                time: Instant::now(),
+                                data: Some(response),
+                            };
+                        }
+                        Err(e) => tracing::warn!(?e, "failed to obtain lock on cached response"),
+                    },
+                    Err(e) => tracing::warn!(?e, "failed to get response from blocknative"),
                 }
                 tokio::time::sleep(RATE_LIMIT).await;
             }
         });
 
-        Self {
+        Ok(Self {
             cached_response,
             handle,
-        }
+        })
     }
 }
 
 #[async_trait::async_trait]
 impl GasPriceEstimating for BlockNative {
     async fn estimate_with_limits(&self, _gas_limit: f64, time_limit: Duration) -> Result<f64> {
-        let response = match self.cached_response.lock().await.as_ref() {
-            Some(data) => data.data.clone().unwrap_or_default(),
-            None => Default::default(),
-        };
-
-        estimate_with_limits(time_limit, response)
+        match self.cached_response.lock() {
+            Ok(cached_response) => estimate_with_limits(time_limit, cached_response.clone()),
+            Err(e) => {
+                tracing::warn!(?e, "failed to obtain lock on cached response");
+                return Err(anyhow!("failed to obtain lock on cached response"));
+            }
+        }
     }
 }
 
-fn estimate_with_limits(time_limit: Duration, mut response: Response) -> Result<f64> {
-    if let Some(block) = response.block_prices.first_mut() {
+fn estimate_with_limits(
+    time_limit: Duration,
+    cached_response: CachedResponse<Response>,
+) -> Result<f64> {
+    if Instant::now().saturating_duration_since(cached_response.time) > CACHED_RESPONSE_VALIDITY {
+        return Err(anyhow!("cached response is stale"));
+    }
+
+    if let Some(block) = cached_response
+        .data
+        .unwrap_or_default()
+        .block_prices
+        .first_mut()
+    {
         //need to sort by confidence since Blocknative API does not guarantee sorted response
         block
             .estimated_prices
@@ -150,7 +189,9 @@ mod tests {
                     .unwrap(), //or replace with api_key
             );
 
-            let blocknative = BlockNative::new(TestTransport::default(), header);
+            let blocknative = BlockNative::new(TestTransport::default(), header)
+                .await
+                .unwrap();
 
             let mut interval = tokio::time::interval(Duration::from_secs(3));
             for _ in 0..9 {
@@ -170,6 +211,18 @@ mod tests {
         for i in 0..29 {
             interval.tick().await;
             println!("test {}", i);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn expect_constructor_fail() {
+        {
+            let header = http::header::HeaderMap::new(); //missing authorization
+
+            let blocknative = BlockNative::new(TestTransport::default(), header).await;
+
+            assert!(blocknative.is_err());
         }
     }
 
@@ -223,16 +276,20 @@ mod tests {
           ]
         });
         let response: Response = serde_json::from_value(json).unwrap();
+        let cached_response = CachedResponse {
+            time: Instant::now(),
+            data: Some(response),
+        };
 
-        let price = estimate_with_limits(Duration::from_secs(10), response.clone()).unwrap();
+        let price = estimate_with_limits(Duration::from_secs(10), cached_response.clone()).unwrap();
         assert_eq!(price, 104.0);
-        let price = estimate_with_limits(Duration::from_secs(16), response.clone()).unwrap();
+        let price = estimate_with_limits(Duration::from_secs(16), cached_response.clone()).unwrap();
         assert_eq!(price, 98.76);
-        let price = estimate_with_limits(Duration::from_secs(17), response.clone()).unwrap();
+        let price = estimate_with_limits(Duration::from_secs(17), cached_response.clone()).unwrap();
         assert_eq!(price, 97.84);
-        let price = estimate_with_limits(Duration::from_secs(19), response.clone()).unwrap();
+        let price = estimate_with_limits(Duration::from_secs(19), cached_response.clone()).unwrap();
         assert_eq!(price, 96.90666666666667);
-        let price = estimate_with_limits(Duration::from_secs(25), response).unwrap();
+        let price = estimate_with_limits(Duration::from_secs(25), cached_response).unwrap();
         assert_eq!(price, 96.0);
     }
 }

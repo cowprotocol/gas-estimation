@@ -50,12 +50,21 @@ pub trait Transport: Send + Sync {
 
 /// Used for rate limit implementation. If requests are received at a higher rate then Gas price estimators
 /// can handle, we need to have a cached value that will be returned instead of error.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CachedResponse<T> {
     // The time at which the request was sent.
     time: Instant,
     // The result of the last response. Error isn't Clone so we store None in the error case.
     data: Option<T>,
+}
+
+impl<T> Default for CachedResponse<T> {
+    fn default() -> Self {
+        Self {
+            time: Instant::now(),
+            data: Default::default(),
+        }
+    }
 }
 
 #[cfg(test)]
