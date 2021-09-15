@@ -17,7 +17,7 @@ use tokio::{
 const API_URI: &str = "https://api.blocknative.com/gasprices/blockprices";
 
 const TIME_PER_BLOCK: Duration = Duration::from_secs(15);
-const RATE_LIMIT: u64 = 10;
+const RATE_LIMIT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -73,10 +73,8 @@ impl BlockNative {
 
         //spawn task for updating the cached response
         let handle = task::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(RATE_LIMIT));
             let request = Request { transport, header };
             loop {
-                interval.tick().await;
                 if let Ok(response) = request.gas_price().await {
                     let mut data = cached_response_clone.lock().await;
                     *data = Some(CachedResponse {
@@ -84,6 +82,7 @@ impl BlockNative {
                         data: Some(response),
                     });
                 }
+                tokio::time::sleep(RATE_LIMIT).await;
             }
         });
 
