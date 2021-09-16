@@ -1,5 +1,4 @@
 use super::{linear_interpolation, GasPriceEstimating, Transport};
-use crate::CachedResponse;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::{
@@ -38,6 +37,25 @@ struct Response {
     block_prices: Vec<BlockPrice>,
 }
 
+/// Used for rate limit implementation. If requests are received at a higher rate then Gas price estimators
+/// can handle, we need to have a cached value that will be returned instead of error.
+#[derive(Debug, Clone)]
+pub struct CachedResponse {
+    // The time at which the request was sent.
+    time: Instant,
+    // The result of the last response. Error isn't Clone so we store None in the error case.
+    data: Response,
+}
+
+impl Default for CachedResponse {
+    fn default() -> Self {
+        Self {
+            time: Instant::now(),
+            data: Default::default(),
+        }
+    }
+}
+
 struct Request<T> {
     transport: T,
     header: http::header::HeaderMap,
@@ -53,7 +71,7 @@ impl<T: Transport> Request<T> {
 }
 
 pub struct BlockNative {
-    cached_response: Arc<Mutex<CachedResponse<Response>>>,
+    cached_response: Arc<Mutex<CachedResponse>>,
     handle: JoinHandle<()>,
 }
 
@@ -69,24 +87,19 @@ impl BlockNative {
         transport: T,
         header: http::header::HeaderMap,
     ) -> Result<Self> {
-        let cached_response: Arc<Mutex<CachedResponse<Response>>> = Default::default();
+        let cached_response: Arc<Mutex<CachedResponse>> = Default::default();
         let cached_response_clone = cached_response.clone();
 
         //send one request to initially populate the cached response
         let request = Request { transport, header };
         match request.gas_price().await {
-            Ok(response) => match cached_response_clone.lock() {
-                Ok(mut data) => {
-                    *data = CachedResponse {
-                        time: Instant::now(),
-                        data: Some(response),
-                    };
-                }
-                Err(e) => {
-                    tracing::warn!(?e, "failed to obtain lock on cached response");
-                    return Err(anyhow!("failed to obtain lock on cached response"));
-                }
-            },
+            Ok(response) => {
+                let mut data = cached_response_clone.lock().unwrap();
+                *data = CachedResponse {
+                    time: Instant::now(),
+                    data: response,
+                };
+            }
             Err(e) => {
                 tracing::warn!(?e, "failed to get initial response from blocknative");
                 return Err(anyhow!("failed to get initial response from blocknative"));
@@ -96,19 +109,17 @@ impl BlockNative {
         //spawn task for updating the cached response every RATE_LIMIT seconds
         let handle = task::spawn(async move {
             loop {
+                tokio::time::sleep(RATE_LIMIT).await;
                 match request.gas_price().await {
-                    Ok(response) => match cached_response_clone.lock() {
-                        Ok(mut data) => {
-                            *data = CachedResponse {
-                                time: Instant::now(),
-                                data: Some(response),
-                            };
-                        }
-                        Err(e) => tracing::warn!(?e, "failed to obtain lock on cached response"),
-                    },
+                    Ok(response) => {
+                        let mut data = cached_response_clone.lock().unwrap();
+                        *data = CachedResponse {
+                            time: Instant::now(),
+                            data: response,
+                        };
+                    }
                     Err(e) => tracing::warn!(?e, "failed to get response from blocknative"),
                 }
-                tokio::time::sleep(RATE_LIMIT).await;
             }
         });
 
@@ -122,32 +133,18 @@ impl BlockNative {
 #[async_trait::async_trait]
 impl GasPriceEstimating for BlockNative {
     async fn estimate_with_limits(&self, _gas_limit: f64, time_limit: Duration) -> Result<f64> {
-        let cached_response = match self.cached_response.lock() {
-            Ok(cached_response) => cached_response.clone(),
-            Err(e) => {
-                tracing::warn!(?e, "failed to obtain lock on cached response");
-                return Err(anyhow!("failed to obtain lock on cached response"));
-            }
-        };
+        let cached_response = self.cached_response.lock().unwrap().clone();
 
         estimate_with_limits(time_limit, cached_response)
     }
 }
 
-fn estimate_with_limits(
-    time_limit: Duration,
-    cached_response: CachedResponse<Response>,
-) -> Result<f64> {
+fn estimate_with_limits(time_limit: Duration, mut cached_response: CachedResponse) -> Result<f64> {
     if Instant::now().saturating_duration_since(cached_response.time) > CACHED_RESPONSE_VALIDITY {
         return Err(anyhow!("cached response is stale"));
     }
 
-    if let Some(block) = cached_response
-        .data
-        .unwrap_or_default()
-        .block_prices
-        .first_mut()
-    {
+    if let Some(block) = cached_response.data.block_prices.first_mut() {
         //need to sort by confidence since Blocknative API does not guarantee sorted response
         block
             .estimated_prices
@@ -280,18 +277,18 @@ mod tests {
         let response: Response = serde_json::from_value(json).unwrap();
         let cached_response = CachedResponse {
             time: Instant::now(),
-            data: Some(response),
+            data: response,
         };
 
         let price = estimate_with_limits(Duration::from_secs(10), cached_response.clone()).unwrap();
-        assert_eq!(price, f64::from(104.0));
+        assert_eq!(price, 104.0);
         let price = estimate_with_limits(Duration::from_secs(16), cached_response.clone()).unwrap();
-        assert_eq!(price, f64::from(98.76));
+        assert_eq!(price, 98.76);
         let price = estimate_with_limits(Duration::from_secs(17), cached_response.clone()).unwrap();
-        assert_eq!(price, f64::from(97.84));
+        assert_eq!(price, 97.84);
         let price = estimate_with_limits(Duration::from_secs(19), cached_response.clone()).unwrap();
-        assert_eq!(price, f64::from(96.90666666666667));
+        assert_eq!(price, 96.90666666666667);
         let price = estimate_with_limits(Duration::from_secs(25), cached_response).unwrap();
-        assert_eq!(price, f64::from(96.0));
+        assert_eq!(price, 96.0);
     }
 }
