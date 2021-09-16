@@ -1,6 +1,8 @@
 //! # Features
 //! `web3_`: Implements `GasPriceEstimating` for `Web3`.
 
+//#[cfg(feature = "tokio_")]
+pub mod blocknative;
 #[cfg(feature = "web3_")]
 pub mod eth_node;
 pub mod ethgasstation;
@@ -39,22 +41,36 @@ pub trait GasPriceEstimating: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait Transport: Send + Sync {
-    async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T>;
+    async fn get_json<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        header: http::header::HeaderMap,
+    ) -> Result<T>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use isahc::{http::uri::Uri, AsyncReadResponseExt};
-    use std::{future::Future, str::FromStr};
+    use std::future::Future;
 
     #[derive(Default)]
     pub struct TestTransport {}
 
     #[async_trait::async_trait]
     impl Transport for TestTransport {
-        async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T> {
-            let json: String = isahc::get_async(Uri::from_str(url)?).await?.text().await?;
+        async fn get_json<T: DeserializeOwned>(
+            &self,
+            url: &str,
+            header: http::header::HeaderMap,
+        ) -> Result<T> {
+            let json = reqwest::Client::new()
+                .get(url)
+                .headers(header)
+                .send()
+                .await?
+                .text()
+                .await?;
+
             Ok(serde_json::from_str(&json)?)
         }
     }

@@ -71,7 +71,7 @@ impl<T: Transport> GasNowGasStation<T> {
 
     async fn gas_price_without_cache(&self) -> Result<Response> {
         self.transport
-            .get_json(API_URI)
+            .get_json(API_URI, Default::default())
             .await
             .context("failed to get gasnow gas price")
     }
@@ -91,12 +91,7 @@ impl<T: Transport> GasNowGasStation<T> {
         // checked_duration_since to catch this.
         let mut lock = self.last_response.lock().await;
         match lock.as_ref() {
-            Some(cached)
-                if now
-                    .checked_duration_since(cached.time)
-                    .unwrap_or_else(|| Duration::from_secs(0))
-                    < RATE_LIMIT =>
-            {
+            Some(cached) if now.saturating_duration_since(cached.time) < RATE_LIMIT => {
                 match cached.data {
                     Some(response) => Ok(response),
                     None => Err(anyhow!(

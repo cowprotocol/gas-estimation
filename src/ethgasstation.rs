@@ -32,7 +32,7 @@ impl<T: Transport> EthGasStation<T> {
 
     async fn gas_price(&self) -> Result<Response> {
         self.transport
-            .get_json(API_URI)
+            .get_json(API_URI, Default::default())
             .await
             .context("failed to get ethgasstation gas price")
     }
