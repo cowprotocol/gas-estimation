@@ -122,13 +122,15 @@ impl BlockNative {
 #[async_trait::async_trait]
 impl GasPriceEstimating for BlockNative {
     async fn estimate_with_limits(&self, _gas_limit: f64, time_limit: Duration) -> Result<f64> {
-        match self.cached_response.lock() {
-            Ok(cached_response) => estimate_with_limits(time_limit, cached_response.clone()),
+        let cached_response = match self.cached_response.lock() {
+            Ok(cached_response) => cached_response.clone(),
             Err(e) => {
                 tracing::warn!(?e, "failed to obtain lock on cached response");
                 return Err(anyhow!("failed to obtain lock on cached response"));
             }
-        }
+        };
+
+        estimate_with_limits(time_limit, cached_response)
     }
 }
 
