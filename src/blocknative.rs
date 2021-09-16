@@ -171,7 +171,7 @@ fn estimate_with_limits(
         ));
     }
 
-    return Err(anyhow!("no valid response exist"));
+    Err(anyhow!("no valid response exist"))
 }
 
 #[cfg(test)]
@@ -284,14 +284,14 @@ mod tests {
         };
 
         let price = estimate_with_limits(Duration::from_secs(10), cached_response.clone()).unwrap();
-        assert_eq!(price, 104.0);
+        assert_eq!(price, f64::from(104.0));
         let price = estimate_with_limits(Duration::from_secs(16), cached_response.clone()).unwrap();
-        assert_eq!(price, 98.76);
+        assert_eq!(price, f64::from(98.76));
         let price = estimate_with_limits(Duration::from_secs(17), cached_response.clone()).unwrap();
-        assert_eq!(price, 97.84);
+        assert_eq!(price, f64::from(97.84));
         let price = estimate_with_limits(Duration::from_secs(19), cached_response.clone()).unwrap();
-        assert_eq!(price, 96.90666666666667);
+        assert_eq!(price, f64::from(96.90666666666667));
         let price = estimate_with_limits(Duration::from_secs(25), cached_response).unwrap();
-        assert_eq!(price, 96.0);
+        assert_eq!(price, f64::from(96.0));
     }
 }
