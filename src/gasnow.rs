@@ -48,16 +48,17 @@ pub fn estimate_with_limits(
     _gas_limit: f64,
     time_limit: Duration,
     response: &ResponseData,
-) -> Result<f64> {
+) -> Result<(f64, f64, f64)> {
     let points: &[(f64, f64)] = &[
         (RAPID.as_secs_f64(), response.rapid),
         (FAST.as_secs_f64(), response.fast),
         (STANDARD.as_secs_f64(), response.standard),
         (SLOW.as_secs_f64(), response.slow),
     ];
-    Ok(linear_interpolation::interpolate(
-        time_limit.as_secs_f64(),
-        points.try_into()?,
+    Ok((
+        linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?),
+        Default::default(),
+        Default::default(),
     ))
 }
 
@@ -113,7 +114,11 @@ impl<T: Transport> GasNowGasStation<T> {
 
 #[async_trait::async_trait]
 impl<T: Transport> GasPriceEstimating for GasNowGasStation<T> {
-    async fn estimate_with_limits(&self, gas_limit: f64, time_limit: Duration) -> Result<f64> {
+    async fn estimate_with_limits(
+        &self,
+        gas_limit: f64,
+        time_limit: Duration,
+    ) -> Result<(f64, f64, f64)> {
         let response = self
             .gas_price_with_cache(Instant::now(), || self.gas_price_without_cache())
             .await?
@@ -143,7 +148,7 @@ mod tests {
             slow: 1.0,
         };
         let result = estimate_with_limits(0., Duration::from_secs(20), &data).unwrap();
-        assert!(result > 3.0 && result < 4.0);
+        assert!(result.0 > 3.0 && result.0 < 4.0);
     }
 
     #[test]
