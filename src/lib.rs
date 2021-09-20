@@ -29,8 +29,8 @@ pub const DEFAULT_TIME_LIMIT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Default, PartialEq)]
 pub struct GasPrice1559 {
-    max_fee: f64,
-    max_priority_fee: f64,
+    max_fee_per_gas: f64,
+    max_priority_fee_per_gas: f64,
 }
 
 #[derive(Debug, Default, PartialEq)]
