@@ -70,7 +70,7 @@ fn estimate_with_limits(response: &Response, time_limit: Duration) -> Result<Gas
         linear_interpolation::interpolate(time_limit_in_minutes, points.as_slice().try_into()?);
     let gas_price_in_wei = gas_price_in_x10_gwei * 1e8;
     Ok(GasPrice {
-        gas_price: gas_price_in_wei,
+        legacy: gas_price_in_wei,
         ..Default::default()
     })
 }
@@ -93,7 +93,7 @@ mod tests {
             println!(
                 "gas price estimate for {} seconds: {} gwei",
                 time_limit.as_secs(),
-                price.gas_price / 1e9,
+                price.legacy / 1e9,
             );
         }
     }

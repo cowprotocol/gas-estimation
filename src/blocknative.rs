@@ -197,11 +197,11 @@ fn estimate_with_limits(
             .collect::<Vec<(f64, f64)>>();
 
         return Ok(GasPrice {
-            gas_price: linear_interpolation::interpolate(
+            legacy: linear_interpolation::interpolate(
                 time_limit.as_secs_f64(),
                 gas_price_points.as_slice().try_into()?,
             ),
-            gas_price_1559: Some(GasPrice1559 {
+            eip1559: Some(GasPrice1559 {
                 max_fee_per_gas: linear_interpolation::interpolate(
                     time_limit.as_secs_f64(),
                     max_fee_per_gas_points.as_slice().try_into()?,
@@ -330,8 +330,8 @@ mod tests {
         assert_eq!(
             price,
             GasPrice {
-                gas_price: 104.0,
-                gas_price_1559: Some(GasPrice1559 {
+                legacy: 104.0,
+                eip1559: Some(GasPrice1559 {
                     max_fee_per_gas: 199.16,
                     max_priority_fee_per_gas: 9.86
                 })
@@ -341,8 +341,8 @@ mod tests {
         assert_eq!(
             price,
             GasPrice {
-                gas_price: 98.76,
-                gas_price_1559: Some(GasPrice1559 {
+                legacy: 98.76,
+                eip1559: Some(GasPrice1559 {
                     max_fee_per_gas: 194.134,
                     max_priority_fee_per_gas: 4.844000000000001
                 })
@@ -352,8 +352,8 @@ mod tests {
         assert_eq!(
             price,
             GasPrice {
-                gas_price: 97.84,
-                gas_price_1559: Some(GasPrice1559 {
+                legacy: 97.84,
+                eip1559: Some(GasPrice1559 {
                     max_fee_per_gas: 193.2612,
                     max_priority_fee_per_gas: 3.9696000000000007
                 })
@@ -363,8 +363,8 @@ mod tests {
         assert_eq!(
             price,
             GasPrice {
-                gas_price: 96.90666666666667,
-                gas_price_1559: Some(GasPrice1559 {
+                legacy: 96.90666666666667,
+                eip1559: Some(GasPrice1559 {
                     max_fee_per_gas: 192.1552,
                     max_priority_fee_per_gas: 2.8552000000000004
                 })
@@ -374,8 +374,8 @@ mod tests {
         assert_eq!(
             price,
             GasPrice {
-                gas_price: 96.0,
-                gas_price_1559: Some(GasPrice1559 {
+                legacy: 96.0,
+                eip1559: Some(GasPrice1559 {
                     max_fee_per_gas: 191.04,
                     max_priority_fee_per_gas: 1.74
                 })

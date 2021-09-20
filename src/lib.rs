@@ -35,8 +35,8 @@ pub struct GasPrice1559 {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct GasPrice {
-    gas_price: f64,
-    gas_price_1559: Option<GasPrice1559>,
+    legacy: f64,
+    eip1559: Option<GasPrice1559>,
 }
 
 #[cfg_attr(test, mockall::automock)]

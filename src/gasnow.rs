@@ -56,7 +56,7 @@ pub fn estimate_with_limits(
         (SLOW.as_secs_f64(), response.slow),
     ];
     Ok(GasPrice {
-        gas_price: linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?),
+        legacy: linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?),
         ..Default::default()
     })
 }
@@ -143,7 +143,7 @@ mod tests {
             slow: 1.0,
         };
         let result = estimate_with_limits(0., Duration::from_secs(20), &data).unwrap();
-        assert!(result.gas_price > 3.0 && result.gas_price < 4.0);
+        assert!(result.legacy > 3.0 && result.legacy < 4.0);
     }
 
     #[test]

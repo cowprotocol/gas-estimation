@@ -92,7 +92,7 @@ impl<T: Transport> GasPriceEstimating for GnosisSafeGasStation<T> {
     async fn estimate(&self) -> Result<GasPrice> {
         let response = self.gas_prices().await?;
         Ok(GasPrice {
-            gas_price: response.fast,
+            legacy: response.fast,
             ..Default::default()
         })
     }
@@ -117,7 +117,7 @@ fn estimate_with_limits(
         (600.0, response.safe_low / 2.0),
     ];
     Ok(GasPrice {
-        gas_price: linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?),
+        legacy: linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?),
         ..Default::default()
     })
 }
@@ -160,7 +160,7 @@ pub mod tests {
             fastest: 500.0,
         };
         let estimate = estimate_with_limits(&price, 0.0, Duration::from_secs(30)).unwrap();
-        assert_approx_eq!(estimate.gas_price, 300.0);
+        assert_approx_eq!(estimate.legacy, 300.0);
     }
 
     // cargo test -p services-core gnosis_safe -- --ignored --nocapture
@@ -177,7 +177,7 @@ pub mod tests {
             println!(
                 "gas price estimate for {} seconds: {} gwei",
                 time_limit.as_secs(),
-                price.gas_price / 1e9,
+                price.legacy / 1e9,
             );
         }
     }

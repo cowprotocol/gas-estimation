@@ -85,7 +85,7 @@ mod tests {
 
         estimator_0.expect_estimate().times(1).returning(|| {
             Ok(GasPrice {
-                gas_price: 1.0,
+                legacy: 1.0,
                 ..Default::default()
             })
         });
@@ -93,7 +93,7 @@ mod tests {
         let priority =
             PriorityGasPriceEstimating::new(vec![Box::new(estimator_0), Box::new(estimator_1)]);
         let result = priority.estimate().now_or_never().unwrap().unwrap();
-        assert_approx_eq!(result.gas_price, 1.0);
+        assert_approx_eq!(result.legacy, 1.0);
     }
 
     #[test]
@@ -107,7 +107,7 @@ mod tests {
             .returning(|| Err(anyhow!("")));
         estimator_1.expect_estimate().times(1).returning(|| {
             Ok(GasPrice {
-                gas_price: 2.0,
+                legacy: 2.0,
                 ..Default::default()
             })
         });
@@ -115,7 +115,7 @@ mod tests {
         let priority =
             PriorityGasPriceEstimating::new(vec![Box::new(estimator_0), Box::new(estimator_1)]);
         let result = priority.estimate().now_or_never().unwrap().unwrap();
-        assert_approx_eq!(result.gas_price, 2.0);
+        assert_approx_eq!(result.legacy, 2.0);
     }
 
     #[test]

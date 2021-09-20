@@ -17,7 +17,7 @@ where
         _gas_limit: f64,
         _time_limit: Duration,
     ) -> Result<GasPrice> {
-        let gas_price = self
+        let legacy = self
             .eth()
             .gas_price()
             .await
@@ -25,7 +25,7 @@ where
             .map(U256::to_f64_lossy)?;
 
         Ok(GasPrice {
-            gas_price,
+            legacy,
             ..Default::default()
         })
     }
