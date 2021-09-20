@@ -24,7 +24,7 @@ where
             .context("failed to get web3 gas price")
             .map(U256::to_f64_lossy)?;
 
-        Some(GasPrice {
+        Ok(GasPrice {
             gas_price,
             ..Default::default()
         })
