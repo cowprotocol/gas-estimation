@@ -1,4 +1,4 @@
-use super::{linear_interpolation, GasPriceEstimating, Transport};
+use super::{linear_interpolation, GasPrice, GasPriceEstimating, Transport};
 use anyhow::{Context, Result};
 use std::{convert::TryInto, time::Duration};
 
@@ -40,14 +40,18 @@ impl<T: Transport> EthGasStation<T> {
 
 #[async_trait::async_trait]
 impl<T: Transport> GasPriceEstimating for EthGasStation<T> {
-    async fn estimate_with_limits(&self, _gas_limit: f64, time_limit: Duration) -> Result<f64> {
+    async fn estimate_with_limits(
+        &self,
+        _gas_limit: f64,
+        time_limit: Duration,
+    ) -> Result<GasPrice> {
         let response = self.gas_price().await?;
         let result = estimate_with_limits(&response, time_limit)?;
         Ok(result)
     }
 }
 
-fn estimate_with_limits(response: &Response, time_limit: Duration) -> Result<f64> {
+fn estimate_with_limits(response: &Response, time_limit: Duration) -> Result<GasPrice> {
     let time_limit_in_minutes = time_limit.as_secs_f64() / 60.0;
     // Ethgasstation sometimes has the same time value for fastest and fast (and also gas prices
     // within 5% of eachother). This is not allowed for the linear interpolation so we filter those
@@ -65,7 +69,10 @@ fn estimate_with_limits(response: &Response, time_limit: Duration) -> Result<f64
     let gas_price_in_x10_gwei =
         linear_interpolation::interpolate(time_limit_in_minutes, points.as_slice().try_into()?);
     let gas_price_in_wei = gas_price_in_x10_gwei * 1e8;
-    Ok(gas_price_in_wei)
+    Ok(GasPrice {
+        legacy: gas_price_in_wei,
+        ..Default::default()
+    })
 }
 
 #[cfg(test)]
@@ -86,7 +93,7 @@ mod tests {
             println!(
                 "gas price estimate for {} seconds: {} gwei",
                 time_limit.as_secs(),
-                price / 1e9,
+                price.legacy / 1e9,
             );
         }
     }

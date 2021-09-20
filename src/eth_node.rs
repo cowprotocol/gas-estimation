@@ -1,6 +1,6 @@
 //! Ethereum node `GasPriceEstimating` implementation.
 
-use super::GasPriceEstimating;
+use super::{GasPrice, GasPriceEstimating};
 use anyhow::{Context, Result};
 use primitive_types::U256;
 use std::time::Duration;
@@ -12,11 +12,21 @@ where
     T: Transport + Send + Sync,
     <T as Transport>::Out: Send,
 {
-    async fn estimate_with_limits(&self, _gas_limit: f64, _time_limit: Duration) -> Result<f64> {
-        self.eth()
+    async fn estimate_with_limits(
+        &self,
+        _gas_limit: f64,
+        _time_limit: Duration,
+    ) -> Result<GasPrice> {
+        let legacy = self
+            .eth()
             .gas_price()
             .await
             .context("failed to get web3 gas price")
-            .map(U256::to_f64_lossy)
+            .map(U256::to_f64_lossy)?;
+
+        Ok(GasPrice {
+            legacy,
+            ..Default::default()
+        })
     }
 }

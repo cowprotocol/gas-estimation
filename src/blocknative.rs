@@ -1,4 +1,4 @@
-use super::{linear_interpolation, GasPriceEstimating, Transport};
+use super::{linear_interpolation, GasPrice, GasPrice1559, GasPriceEstimating, Transport};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::{
@@ -132,14 +132,21 @@ impl BlockNative {
 
 #[async_trait::async_trait]
 impl GasPriceEstimating for BlockNative {
-    async fn estimate_with_limits(&self, _gas_limit: f64, time_limit: Duration) -> Result<f64> {
+    async fn estimate_with_limits(
+        &self,
+        _gas_limit: f64,
+        time_limit: Duration,
+    ) -> Result<GasPrice> {
         let cached_response = self.cached_response.lock().unwrap().clone();
 
         estimate_with_limits(time_limit, cached_response)
     }
 }
 
-fn estimate_with_limits(time_limit: Duration, mut cached_response: CachedResponse) -> Result<f64> {
+fn estimate_with_limits(
+    time_limit: Duration,
+    mut cached_response: CachedResponse,
+) -> Result<GasPrice> {
     if Instant::now().saturating_duration_since(cached_response.time) > CACHED_RESPONSE_VALIDITY {
         return Err(anyhow!("cached response is stale"));
     }
@@ -158,14 +165,53 @@ fn estimate_with_limits(time_limit: Duration, mut cached_response: CachedRespons
                 (
                     TIME_PER_BLOCK.as_secs_f64() / (estimated_price.confidence / 100.0),
                     estimated_price.price,
+                    estimated_price.max_fee_per_gas,
+                    estimated_price.max_priority_fee_per_gas,
                 )
             })
+            .collect::<Vec<(f64, f64, f64, f64)>>();
+
+        let gas_price_points = points
+            .iter()
+            .map(
+                |(duration, gas_price, _max_fee_per_gas, _max_priority_fee_per_gas)| {
+                    (duration.clone(), gas_price.clone())
+                },
+            )
+            .collect::<Vec<(f64, f64)>>();
+        let max_fee_per_gas_points = points
+            .iter()
+            .map(
+                |(duration, _gas_price, max_fee_per_gas, _max_priority_fee_per_gas)| {
+                    (duration.clone(), max_fee_per_gas.clone())
+                },
+            )
+            .collect::<Vec<(f64, f64)>>();
+        let max_priority_fee_per_gas_points = points
+            .iter()
+            .map(
+                |(duration, _gas_price, _max_fee_per_gas, max_priority_fee_per_gas)| {
+                    (duration.clone(), max_priority_fee_per_gas.clone())
+                },
+            )
             .collect::<Vec<(f64, f64)>>();
 
-        return Ok(linear_interpolation::interpolate(
-            time_limit.as_secs_f64(),
-            points.as_slice().try_into()?,
-        ));
+        return Ok(GasPrice {
+            legacy: linear_interpolation::interpolate(
+                time_limit.as_secs_f64(),
+                gas_price_points.as_slice().try_into()?,
+            ),
+            eip1559: Some(GasPrice1559 {
+                max_fee_per_gas: linear_interpolation::interpolate(
+                    time_limit.as_secs_f64(),
+                    max_fee_per_gas_points.as_slice().try_into()?,
+                ),
+                max_priority_fee_per_gas: linear_interpolation::interpolate(
+                    time_limit.as_secs_f64(),
+                    max_priority_fee_per_gas_points.as_slice().try_into()?,
+                ),
+            }),
+        });
     }
 
     Err(anyhow!("no valid response exist"))
@@ -200,7 +246,7 @@ mod tests {
                     .estimate_with_limits(0.0, Duration::from_secs(20))
                     .await
                     .unwrap_or_default();
-                println!("res {}", res);
+                println!("res {:?}", res);
             }
         }
 
@@ -281,14 +327,59 @@ mod tests {
         };
 
         let price = estimate_with_limits(Duration::from_secs(10), cached_response.clone()).unwrap();
-        assert_eq!(price, 104.0);
+        assert_eq!(
+            price,
+            GasPrice {
+                legacy: 104.0,
+                eip1559: Some(GasPrice1559 {
+                    max_fee_per_gas: 199.16,
+                    max_priority_fee_per_gas: 9.86
+                })
+            }
+        );
         let price = estimate_with_limits(Duration::from_secs(16), cached_response.clone()).unwrap();
-        assert_eq!(price, 98.76);
+        assert_eq!(
+            price,
+            GasPrice {
+                legacy: 98.76,
+                eip1559: Some(GasPrice1559 {
+                    max_fee_per_gas: 194.134,
+                    max_priority_fee_per_gas: 4.844000000000001
+                })
+            }
+        );
         let price = estimate_with_limits(Duration::from_secs(17), cached_response.clone()).unwrap();
-        assert_eq!(price, 97.84);
+        assert_eq!(
+            price,
+            GasPrice {
+                legacy: 97.84,
+                eip1559: Some(GasPrice1559 {
+                    max_fee_per_gas: 193.2612,
+                    max_priority_fee_per_gas: 3.9696000000000007
+                })
+            }
+        );
         let price = estimate_with_limits(Duration::from_secs(19), cached_response.clone()).unwrap();
-        assert_eq!(price, 96.90666666666667);
+        assert_eq!(
+            price,
+            GasPrice {
+                legacy: 96.90666666666667,
+                eip1559: Some(GasPrice1559 {
+                    max_fee_per_gas: 192.1552,
+                    max_priority_fee_per_gas: 2.8552000000000004
+                })
+            }
+        );
         let price = estimate_with_limits(Duration::from_secs(25), cached_response).unwrap();
-        assert_eq!(price, 96.0);
+        assert_eq!(
+            price,
+            GasPrice {
+                legacy: 96.0,
+                eip1559: Some(GasPrice1559 {
+                    max_fee_per_gas: 191.04,
+                    max_priority_fee_per_gas: 1.74
+                })
+            }
+        );
     }
 }
