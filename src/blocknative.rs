@@ -1,4 +1,4 @@
-use super::{linear_interpolation, GasPrice, GasPrice1559, GasPriceEstimating, Transport};
+use super::{linear_interpolation, EstimatedGasPrice, GasPrice1559, GasPriceEstimating, Transport};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::{
@@ -25,16 +25,53 @@ struct EstimatedPrice {
     max_fee_per_gas: f64,
 }
 
+impl EstimatedPrice {
+    fn gwei_to_wei(self) -> Self {
+        Self {
+            price: self.price * 1_000_000_000.0,
+            max_fee_per_gas: self.max_fee_per_gas * 1_000_000_000.0,
+            max_priority_fee_per_gas: self.max_priority_fee_per_gas * 1_000_000_000.0,
+            ..self
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 struct BlockPrice {
     estimated_prices: Vec<EstimatedPrice>,
+    base_fee_per_gas: f64,
+}
+
+impl BlockPrice {
+    fn gwei_to_wei(self) -> Self {
+        Self {
+            base_fee_per_gas: self.base_fee_per_gas * 1_000_000_000.0,
+            estimated_prices: self
+                .estimated_prices
+                .into_iter()
+                .map(|price| price.gwei_to_wei())
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, serde::Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 struct Response {
     block_prices: Vec<BlockPrice>,
+}
+
+impl Response {
+    fn gwei_to_wei(self) -> Self {
+        Self {
+            block_prices: self
+                .block_prices
+                .into_iter()
+                .map(|block| block.gwei_to_wei())
+                .collect(),
+        }
+    }
 }
 
 /// Used for rate limit implementation. If requests are received at a higher rate then Gas price estimators
@@ -94,10 +131,9 @@ impl BlockNative {
         let request = Request { transport, header };
         match request.gas_price().await {
             Ok(response) => {
-                let mut data = cached_response_clone.lock().unwrap();
-                *data = CachedResponse {
+                *cached_response_clone.lock().unwrap() = CachedResponse {
                     time: Instant::now(),
-                    data: response,
+                    data: response.gwei_to_wei(),
                 };
             }
             Err(e) => {
@@ -112,10 +148,9 @@ impl BlockNative {
                 tokio::time::sleep(RATE_LIMIT).await;
                 match request.gas_price().await {
                     Ok(response) => {
-                        let mut data = cached_response_clone.lock().unwrap();
-                        *data = CachedResponse {
+                        *cached_response_clone.lock().unwrap() = CachedResponse {
                             time: Instant::now(),
-                            data: response,
+                            data: response.gwei_to_wei(),
                         };
                     }
                     Err(e) => tracing::warn!(?e, "failed to get response from blocknative"),
@@ -136,7 +171,7 @@ impl GasPriceEstimating for BlockNative {
         &self,
         _gas_limit: f64,
         time_limit: Duration,
-    ) -> Result<GasPrice> {
+    ) -> Result<EstimatedGasPrice> {
         let cached_response = self.cached_response.lock().unwrap().clone();
 
         estimate_with_limits(time_limit, cached_response)
@@ -146,7 +181,7 @@ impl GasPriceEstimating for BlockNative {
 fn estimate_with_limits(
     time_limit: Duration,
     mut cached_response: CachedResponse,
-) -> Result<GasPrice> {
+) -> Result<EstimatedGasPrice> {
     if Instant::now().saturating_duration_since(cached_response.time) > CACHED_RESPONSE_VALIDITY {
         return Err(anyhow!("cached response is stale"));
     }
@@ -175,7 +210,7 @@ fn estimate_with_limits(
             .iter()
             .map(
                 |(duration, gas_price, _max_fee_per_gas, _max_priority_fee_per_gas)| {
-                    (duration.clone(), gas_price.clone())
+                    (*duration, *gas_price)
                 },
             )
             .collect::<Vec<(f64, f64)>>();
@@ -183,7 +218,7 @@ fn estimate_with_limits(
             .iter()
             .map(
                 |(duration, _gas_price, max_fee_per_gas, _max_priority_fee_per_gas)| {
-                    (duration.clone(), max_fee_per_gas.clone())
+                    (*duration, *max_fee_per_gas)
                 },
             )
             .collect::<Vec<(f64, f64)>>();
@@ -191,12 +226,12 @@ fn estimate_with_limits(
             .iter()
             .map(
                 |(duration, _gas_price, _max_fee_per_gas, max_priority_fee_per_gas)| {
-                    (duration.clone(), max_priority_fee_per_gas.clone())
+                    (*duration, *max_priority_fee_per_gas)
                 },
             )
             .collect::<Vec<(f64, f64)>>();
 
-        return Ok(GasPrice {
+        return Ok(EstimatedGasPrice {
             legacy: linear_interpolation::interpolate(
                 time_limit.as_secs_f64(),
                 gas_price_points.as_slice().try_into()?,
@@ -210,6 +245,7 @@ fn estimate_with_limits(
                     time_limit.as_secs_f64(),
                     max_priority_fee_per_gas_points.as_slice().try_into()?,
                 ),
+                base_fee_per_gas: block.base_fee_per_gas,
             }),
         });
     }
@@ -277,14 +313,14 @@ mod tests {
           "system": "ethereum",
           "network": "main",
           "unit": "gwei",
-          "maxPrice": "123",
-          "currentBlockNumber": "13005095",
-          "msSinceLastBlock": "3793",
+          "maxPrice": 123,
+          "currentBlockNumber": 13005095,
+          "msSinceLastBlock": 3793,
           "blockPrices": [
             {
-              "blockNumber": "13005096",
-              "baseFeePerGas": "94.647990462",
-              "estimatedTransactionCount": "137",
+              "blockNumber": 13005096,
+              "baseFeePerGas": 94.647990462,
+              "estimatedTransactionCount": 137,
               "estimatedPrices": [
                 {
                   "confidence": 99,
@@ -329,55 +365,60 @@ mod tests {
         let price = estimate_with_limits(Duration::from_secs(10), cached_response.clone()).unwrap();
         assert_eq!(
             price,
-            GasPrice {
+            EstimatedGasPrice {
                 legacy: 104.0,
                 eip1559: Some(GasPrice1559 {
                     max_fee_per_gas: 199.16,
-                    max_priority_fee_per_gas: 9.86
+                    max_priority_fee_per_gas: 9.86,
+                    base_fee_per_gas: 94.647990462,
                 })
             }
         );
         let price = estimate_with_limits(Duration::from_secs(16), cached_response.clone()).unwrap();
         assert_eq!(
             price,
-            GasPrice {
+            EstimatedGasPrice {
                 legacy: 98.76,
                 eip1559: Some(GasPrice1559 {
                     max_fee_per_gas: 194.134,
-                    max_priority_fee_per_gas: 4.844000000000001
+                    max_priority_fee_per_gas: 4.844000000000001,
+                    base_fee_per_gas: 94.647990462,
                 })
             }
         );
         let price = estimate_with_limits(Duration::from_secs(17), cached_response.clone()).unwrap();
         assert_eq!(
             price,
-            GasPrice {
+            EstimatedGasPrice {
                 legacy: 97.84,
                 eip1559: Some(GasPrice1559 {
                     max_fee_per_gas: 193.2612,
-                    max_priority_fee_per_gas: 3.9696000000000007
+                    max_priority_fee_per_gas: 3.9696000000000007,
+                    base_fee_per_gas: 94.647990462,
                 })
             }
         );
         let price = estimate_with_limits(Duration::from_secs(19), cached_response.clone()).unwrap();
         assert_eq!(
             price,
-            GasPrice {
+            EstimatedGasPrice {
                 legacy: 96.90666666666667,
                 eip1559: Some(GasPrice1559 {
                     max_fee_per_gas: 192.1552,
-                    max_priority_fee_per_gas: 2.8552000000000004
+                    max_priority_fee_per_gas: 2.8552000000000004,
+                    base_fee_per_gas: 94.647990462,
                 })
             }
         );
         let price = estimate_with_limits(Duration::from_secs(25), cached_response).unwrap();
         assert_eq!(
             price,
-            GasPrice {
+            EstimatedGasPrice {
                 legacy: 96.0,
                 eip1559: Some(GasPrice1559 {
                     max_fee_per_gas: 191.04,
-                    max_priority_fee_per_gas: 1.74
+                    max_priority_fee_per_gas: 1.74,
+                    base_fee_per_gas: 94.647990462,
                 })
             }
         );

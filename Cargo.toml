@@ -15,7 +15,7 @@ tokio = { version = "1.9", features = ["sync", "time"], optional = true }
 tokio-tungstenite = { version = "0.15", features = ["native-tls"], optional = true }
 tracing = "0.1"
 url = "2.0"
-web3 = { version = "0.17", default-features = false, optional = true }
+web3 = { git = "https://github.com/tomusdrw/rust-web3.git", rev="2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e", default-features = false, optional = true }
 http = "0.2.4"
 
 [features]

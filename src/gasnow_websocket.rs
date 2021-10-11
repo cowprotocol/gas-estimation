@@ -1,6 +1,6 @@
 use crate::{
     gasnow::{self, ResponseData},
-    GasPrice, GasPriceEstimating,
+    EstimatedGasPrice, GasPriceEstimating,
 };
 use anyhow::{bail, ensure, Result};
 use futures::StreamExt;
@@ -66,7 +66,7 @@ impl GasPriceEstimating for GasNowWebSocketGasStation {
         &self,
         gas_limit: f64,
         time_limit: std::time::Duration,
-    ) -> Result<GasPrice> {
+    ) -> Result<EstimatedGasPrice> {
         if let Some((instant, response)) = *self.receiver.borrow() {
             ensure!(
                 instant.elapsed() <= self.max_update_age,

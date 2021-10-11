@@ -1,4 +1,4 @@
-use super::{linear_interpolation, GasPrice, GasPriceEstimating, Transport};
+use super::{linear_interpolation, EstimatedGasPrice, GasPriceEstimating, Transport};
 use anyhow::{anyhow, Context, Result};
 use futures::lock::Mutex;
 use std::{
@@ -48,14 +48,14 @@ pub fn estimate_with_limits(
     _gas_limit: f64,
     time_limit: Duration,
     response: &ResponseData,
-) -> Result<GasPrice> {
+) -> Result<EstimatedGasPrice> {
     let points: &[(f64, f64)] = &[
         (RAPID.as_secs_f64(), response.rapid),
         (FAST.as_secs_f64(), response.fast),
         (STANDARD.as_secs_f64(), response.standard),
         (SLOW.as_secs_f64(), response.slow),
     ];
-    Ok(GasPrice {
+    Ok(EstimatedGasPrice {
         legacy: linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?),
         ..Default::default()
     })
@@ -113,7 +113,11 @@ impl<T: Transport> GasNowGasStation<T> {
 
 #[async_trait::async_trait]
 impl<T: Transport> GasPriceEstimating for GasNowGasStation<T> {
-    async fn estimate_with_limits(&self, gas_limit: f64, time_limit: Duration) -> Result<GasPrice> {
+    async fn estimate_with_limits(
+        &self,
+        gas_limit: f64,
+        time_limit: Duration,
+    ) -> Result<EstimatedGasPrice> {
         let response = self
             .gas_price_with_cache(Instant::now(), || self.gas_price_without_cache())
             .await?

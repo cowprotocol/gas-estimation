@@ -1,4 +1,4 @@
-use super::{GasPrice, GasPriceEstimating};
+use super::{EstimatedGasPrice, GasPriceEstimating};
 use anyhow::{anyhow, Result};
 use std::{
     future::Future,
@@ -34,10 +34,10 @@ impl PriorityGasPriceEstimating {
         Self { estimators }
     }
 
-    async fn prioritize<'a, T, F>(&'a self, operation: T) -> Result<GasPrice>
+    async fn prioritize<'a, T, F>(&'a self, operation: T) -> Result<EstimatedGasPrice>
     where
         T: Fn(&'a dyn GasPriceEstimating) -> F,
-        F: Future<Output = Result<GasPrice>>,
+        F: Future<Output = Result<EstimatedGasPrice>>,
     {
         for (i, estimator) in self.estimators.iter().enumerate() {
             match operation(estimator.estimator.as_ref()).await {
@@ -61,12 +61,16 @@ impl PriorityGasPriceEstimating {
 
 #[async_trait::async_trait]
 impl GasPriceEstimating for PriorityGasPriceEstimating {
-    async fn estimate_with_limits(&self, gas_limit: f64, time_limit: Duration) -> Result<GasPrice> {
+    async fn estimate_with_limits(
+        &self,
+        gas_limit: f64,
+        time_limit: Duration,
+    ) -> Result<EstimatedGasPrice> {
         self.prioritize(|estimator| estimator.estimate_with_limits(gas_limit, time_limit))
             .await
     }
 
-    async fn estimate(&self) -> Result<GasPrice> {
+    async fn estimate(&self) -> Result<EstimatedGasPrice> {
         self.prioritize(|estimator| estimator.estimate()).await
     }
 }
@@ -84,7 +88,7 @@ mod tests {
         let estimator_1 = MockGasPriceEstimating::new();
 
         estimator_0.expect_estimate().times(1).returning(|| {
-            Ok(GasPrice {
+            Ok(EstimatedGasPrice {
                 legacy: 1.0,
                 ..Default::default()
             })
@@ -106,7 +110,7 @@ mod tests {
             .times(1)
             .returning(|| Err(anyhow!("")));
         estimator_1.expect_estimate().times(1).returning(|| {
-            Ok(GasPrice {
+            Ok(EstimatedGasPrice {
                 legacy: 2.0,
                 ..Default::default()
             })

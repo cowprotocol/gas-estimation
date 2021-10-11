@@ -1,7 +1,7 @@
 //! Gnosis Safe gas station `GasPriceEstimating` implementation.
 //! Api documentation at https://safe-relay.gnosis.io/ .
 
-use super::{linear_interpolation, GasPrice, GasPriceEstimating, Transport};
+use super::{linear_interpolation, EstimatedGasPrice, GasPriceEstimating, Transport};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use serde_with::rust::display_fromstr;
@@ -89,15 +89,19 @@ impl<T: Transport> GnosisSafeGasStation<T> {
 impl<T: Transport> GasPriceEstimating for GnosisSafeGasStation<T> {
     // The default implementation calls estimate_with_limits with 30 seconds which would result in
     // the standard time instead of fast. So to keep that behavior we implement it manually.
-    async fn estimate(&self) -> Result<GasPrice> {
+    async fn estimate(&self) -> Result<EstimatedGasPrice> {
         let response = self.gas_prices().await?;
-        Ok(GasPrice {
+        Ok(EstimatedGasPrice {
             legacy: response.fast,
             ..Default::default()
         })
     }
 
-    async fn estimate_with_limits(&self, gas_limit: f64, time_limit: Duration) -> Result<GasPrice> {
+    async fn estimate_with_limits(
+        &self,
+        gas_limit: f64,
+        time_limit: Duration,
+    ) -> Result<EstimatedGasPrice> {
         let response = self.gas_prices().await?;
         let result = estimate_with_limits(&response, gas_limit, time_limit)?;
         Ok(result)
@@ -108,7 +112,7 @@ fn estimate_with_limits(
     response: &GasPrices,
     _gas_limit: f64,
     time_limit: Duration,
-) -> Result<GasPrice> {
+) -> Result<EstimatedGasPrice> {
     let points: &[(f64, f64)] = &[
         (0.0, response.fast * 2.0),
         (FAST_TIME, response.fast),
@@ -116,7 +120,7 @@ fn estimate_with_limits(
         (SAFE_LOW_TIME, response.safe_low),
         (600.0, response.safe_low / 2.0),
     ];
-    Ok(GasPrice {
+    Ok(EstimatedGasPrice {
         legacy: linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?),
         ..Default::default()
     })
