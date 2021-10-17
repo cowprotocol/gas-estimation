@@ -13,7 +13,7 @@ use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::{error::Error as TungsteniteError, Message};
 use url::Url;
 
-pub const DEFAULT_URL: &str = "wss://www.gasnow.org/ws/gasprice";
+pub const DEFAULT_URL: &str = "wss://etherchain.org/api/gasnow";
 pub const RECONNECT_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Similar to GasNowGasStation but subscribes to their websocket api for updates instead of

@@ -9,7 +9,7 @@ use std::{
 
 // Gas price estimation with https://www.gasnow.org/ , api at https://taichi.network/#gasnow .
 
-const API_URI: &str = "https://www.gasnow.org/api/v3/gas/price";
+const API_URI: &str = "https://etherchain.org/api/gasnow";
 const RATE_LIMIT: Duration = Duration::from_secs(15);
 
 pub struct GasNowGasStation<T> {
