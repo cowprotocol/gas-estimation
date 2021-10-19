@@ -13,6 +13,8 @@ pub mod gasnow_websocket;
 pub mod gnosis_safe;
 mod linear_interpolation;
 pub mod priority;
+//#[cfg(feature = "web3_")]
+pub mod nativegasestimator;
 
 pub use ethgasstation::EthGasStation;
 pub use gas_price::{EstimatedGasPrice, GasPrice1559};
