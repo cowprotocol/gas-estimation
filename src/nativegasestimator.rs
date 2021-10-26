@@ -236,9 +236,9 @@ async fn collect_rewards<T: Transport + Send + Sync>(
             }
 
             let fee_history_reward = fee_history.reward.unwrap();
-            for i in 0..fee_history_reward.len() {
-                for j in 0..=MAX_REWARD_PERCENTILE {
-                    let reward = fee_history_reward[i][j].low_u64();
+            for reward in &fee_history_reward {
+                for i in 0..=MAX_REWARD_PERCENTILE {
+                    let reward = reward[i].low_u64();
                     if reward > 0 {
                         rewards.push(reward);
                     }
