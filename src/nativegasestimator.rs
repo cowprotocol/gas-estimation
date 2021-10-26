@@ -1,68 +1,36 @@
 //! Native gas price estimator based on the https://github.com/zsfelfoldi/feehistory/blob/main/docs/feeOracle.md
 
-use crate::GasPrice1559;
-
-use super::{EstimatedGasPrice, GasPriceEstimating};
-use anyhow::{anyhow, Context, Result};
-use serde::{de::Error, Deserialize, Deserializer};
-use std::f64::consts::{E, PI};
-use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use super::{linear_interpolation, EstimatedGasPrice, GasPrice1559, GasPriceEstimating};
+use anyhow::{anyhow, Result};
+use std::{
+    convert::TryInto,
+    f64::consts::{E, PI},
+    fmt::Debug,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use tokio::task::{self, JoinHandle};
-use web3::{Transport, types::U256};
+use web3::{
+    types::{BlockNumber, U256},
+    Transport,
+};
 
 const SAMPLE_MIN_PERCENTILE: f64 = 10.0; // sampled percentile range of exponentially weighted baseFee history
 const SAMPLE_MAX_PERCENTILE: f64 = 30.0;
 
-const MAX_REWARD_PERCENTILE: usize = 80; // effective reward value to be selected from each individual block
-const MIN_BLOCK_PERCENTILE: f64 = 20.0; // economical priority fee to be selected from sorted individual block reward percentiles
-const MAX_BLOCK_PERCENTILE: f64 = 80.0; // urgent priority fee to be selected from sorted individual block reward percentiles
+const MAX_REWARD_PERCENTILE: usize = 50; // effective reward value to be selected from each individual block
+const MIN_BLOCK_PERCENTILE: f64 = 40.0; // economical priority fee to be selected from sorted individual block reward percentiles
+const MAX_BLOCK_PERCENTILE: f64 = 70.0; // urgent priority fee to be selected from sorted individual block reward percentiles
 
 const MAX_TIME_FACTOR: f64 = 128.0; // highest timeFactor in the returned list of suggestions (power of 2)
 const EXTRA_PRIORITY_FEE_RATIO: f64 = 0.25; // extra priority fee offered in case of expected baseFee rise
-const EXTRA_PRIORITY_FEE_BOOST: f64 = 1559.0;
+const EXTRA_PRIORITY_FEE_BOOST: f64 = 1559.0; // a little extra to add to have a non-rounded value
 const FALLBACK_PRIORITY_FEE: f64 = 2e9; // priority fee offered when there are no recent transactions
 
+const CACHED_RESPONSE_VALIDITY: Duration = Duration::from_secs(60);
+
 //rate limit of ethereum L1 nodes
-const RATE_LIMIT: Duration = Duration::from_secs(7);
-
-#[derive(Debug)]
-pub struct BlockNumber {
-    block_number: u64,
-}
-
-impl BlockNumber {
-    pub fn new(block_number: u64) -> Self {
-        BlockNumber { block_number }
-    }
-}
-
-impl<'a> Deserialize<'a> for BlockNumber {
-    fn deserialize<D>(deserializer: D) -> Result<BlockNumber, D::Error>
-    where
-        D: Deserializer<'a>,
-    {
-        let value = String::deserialize(deserializer)?;
-        match value {
-            _ if value.starts_with("0x") => u64::from_str_radix(&value[2..], 16)
-                .map(BlockNumber::new)
-                .map_err(|e| Error::custom(format!("Invalid block number: {}", e))),
-            _ => Err(Error::custom(
-                "Invalid block number: missing 0x prefix".to_string(),
-            )),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EthFeeHistory {
-    pub oldest_block: BlockNumber,
-    pub base_fee_per_gas: Vec<U256>,
-    pub gas_used_ratio: Vec<f64>,
-    pub reward: Option<Vec<Vec<U256>>>,
-}
+const RATE_LIMIT: Duration = Duration::from_secs(5);
 
 /// Used for rate limit implementation. If requests are received at a higher rate then Gas price estimators
 /// can handle, we need to have a cached value that will be returned instead of error.
@@ -159,10 +127,15 @@ impl NativeGasEstimator {
 async fn suggest_fee<T: Transport + Send + Sync>(
     transport: T,
 ) -> Result<Vec<(f64, EstimatedGasPrice)>> {
-    let params = vec![300.into(), "latest".into(), ().into()];
-    let response = transport.execute("eth_feeHistory", params).await?;
-    let fee_history: EthFeeHistory =
-        serde_json::from_value(response).context("deserialize failed")?;
+    let web3 = web3::Web3::new(transport.clone());
+    let fee_history = web3
+        .eth()
+        .fee_history(
+            300.into(),
+            serde_json::from_value::<BlockNumber>("latest".into()).unwrap(),
+            None,
+        )
+        .await?;
 
     // Initialize
     let mut base_fee = fee_history.base_fee_per_gas.clone();
@@ -181,16 +154,15 @@ async fn suggest_fee<T: Transport + Send + Sync>(
         }
     }
 
-    order.sort_by(|a, b| {
-        base_fee[*a].cmp(&base_fee[*b]) //check if equivalent
-    });
+    order.sort_by(|a, b| base_fee[*a].cmp(&base_fee[*b]));
 
-    let rewards = collect_rewards(
-        transport,
-        fee_history.oldest_block.block_number,
-        fee_history.gas_used_ratio,
-    )
-    .await?;
+    let oldest_block = if let BlockNumber::Number(x) = fee_history.oldest_block {
+        x.as_u64()
+    } else {
+        return Err(anyhow!("invalid oldest block"));
+    };
+
+    let rewards = collect_rewards(transport, oldest_block, fee_history.gas_used_ratio).await?;
     let mut result = vec![];
     let mut max_base_fee = 0.0;
     let mut time_factor = MAX_TIME_FACTOR;
@@ -211,17 +183,17 @@ async fn suggest_fee<T: Transport + Send + Sync>(
         result.push((
             time_factor,
             EstimatedGasPrice {
-                legacy: 0.0,
                 eip1559: Some(GasPrice1559 {
                     base_fee_per_gas: fee_history
                         .base_fee_per_gas
                         .last()
                         .copied()
                         .unwrap_or_default()
-                        .low_u64() as f64, //check
+                        .low_u64() as f64,
                     max_fee_per_gas: min_base_fee + priority_fee,
                     max_priority_fee_per_gas: priority_fee + extra_fee,
                 }),
+                ..Default::default()
             },
         ));
 
@@ -238,7 +210,7 @@ async fn collect_rewards<T: Transport + Send + Sync>(
 ) -> Result<Vec<u64>> {
     let mut percentiles = vec![];
     for i in 0..=MAX_REWARD_PERCENTILE {
-        percentiles.push(i);
+        percentiles.push(i as f64);
     }
 
     let mut ptr = gas_used_ratio.len() - 1;
@@ -249,14 +221,15 @@ async fn collect_rewards<T: Transport + Send + Sync>(
         if block_count > 0 {
             // feeHistory API call with reward percentile specified is expensive and therefore is only requested for a few
             // non-full recent blocks.
-            let params = vec![
-                block_count.into(),
-                format!("0x{:x}", first_block + ptr as u64).into(), //newest_block
-                percentiles.clone().into(),
-            ];
-            let response = transport.execute("eth_feeHistory", params).await?;
-            let fee_history: EthFeeHistory =
-                serde_json::from_value(response).context("deserialize failed")?;
+            let web3 = web3::Web3::new(transport.clone());
+            let fee_history = web3
+                .eth()
+                .fee_history(
+                    block_count.into(),
+                    (first_block + ptr as u64).into(),
+                    Some(percentiles.clone()).into(),
+                )
+                .await?;
 
             if fee_history.reward.is_none() {
                 break;
@@ -284,7 +257,7 @@ async fn collect_rewards<T: Transport + Send + Sync>(
         ptr -= block_count + 1;
     }
 
-    rewards.sort_unstable(); //check if needed asc or desc
+    rewards.sort_unstable();
     Ok(rewards)
 }
 
@@ -373,12 +346,72 @@ impl GasPriceEstimating for NativeGasEstimator {
     async fn estimate_with_limits(
         &self,
         _gas_limit: f64,
-        _time_limit: Duration,
+        time_limit: Duration,
     ) -> Result<EstimatedGasPrice> {
         let cached_response = self.cached_response.lock().unwrap().clone();
 
-        Ok(cached_response.data.first().copied().unwrap_or_default().1) //todo
+        estimate_with_limits(time_limit, cached_response)
     }
+}
+
+fn estimate_with_limits(
+    time_limit: Duration,
+    cached_response: CachedResponse,
+) -> Result<EstimatedGasPrice> {
+    if Instant::now().saturating_duration_since(cached_response.time) > CACHED_RESPONSE_VALIDITY {
+        return Err(anyhow!("cached response is stale"));
+    }
+
+    if cached_response.data.is_empty() {
+        return Err(anyhow!("no cached data exist"));
+    }
+
+    let max_fee_per_gas_points = cached_response
+        .data
+        .iter()
+        .map(|(time_limit, gas_price)| {
+            (
+                *time_limit,
+                gas_price.eip1559.unwrap_or_default().max_fee_per_gas,
+            )
+        })
+        .collect::<Vec<(f64, f64)>>();
+    let max_priority_fee_per_gas_points = cached_response
+        .data
+        .iter()
+        .map(|(time_limit, gas_price)| {
+            (
+                *time_limit,
+                gas_price
+                    .eip1559
+                    .unwrap_or_default()
+                    .max_priority_fee_per_gas,
+            )
+        })
+        .collect::<Vec<(f64, f64)>>();
+    let base_fee_per_gas = if let Some(eip1559) = cached_response.data[0] //checked above
+        .1
+        .eip1559
+    {
+        eip1559.base_fee_per_gas
+    } else {
+        return Err(anyhow!("no eip1559 estimate exist"));
+    };
+
+    return Ok(EstimatedGasPrice {
+        eip1559: Some(GasPrice1559 {
+            max_fee_per_gas: linear_interpolation::interpolate(
+                time_limit.as_secs_f64(),
+                max_fee_per_gas_points.as_slice().try_into()?,
+            ),
+            max_priority_fee_per_gas: linear_interpolation::interpolate(
+                time_limit.as_secs_f64(),
+                max_priority_fee_per_gas_points.as_slice().try_into()?,
+            ),
+            base_fee_per_gas,
+        }),
+        ..Default::default()
+    });
 }
 
 #[cfg(test)]
@@ -422,7 +455,7 @@ mod tests {
             interval.tick().await;
 
             let res = native_gas_estimator
-                .estimate_with_limits(0.0, Duration::from_secs(3))
+                .estimate_with_limits(0.0, Duration::from_secs(0))
                 .await
                 .unwrap_or_default();
 
