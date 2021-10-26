@@ -11,7 +11,7 @@ pub mod gasnow;
 pub mod gnosis_safe;
 mod linear_interpolation;
 pub mod priority;
-//#[cfg(feature = "web3_")]
+#[cfg(feature = "web3_")]
 pub mod nativegasestimator;
 
 #[cfg(feature = "tokio_")]
