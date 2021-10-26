@@ -394,6 +394,7 @@ mod tests {
     use std::{fs::File, io::Write};
 
     #[tokio::test]
+    #[ignore]
     async fn real_request() {
         let mut file = File::create("foo.txt").unwrap();
 
