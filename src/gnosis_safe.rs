@@ -128,7 +128,7 @@ fn estimate_with_limits(
 
 #[cfg(test)]
 pub mod tests {
-    use super::super::tests::{FutureWaitExt as _, TestTransport};
+    use super::super::tests::TestTransport;
     use super::super::DEFAULT_GAS_LIMIT;
     use super::*;
     use assert_approx_eq::assert_approx_eq;
@@ -168,12 +168,12 @@ pub mod tests {
     }
 
     // cargo test -p services-core gnosis_safe -- --ignored --nocapture
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn real_request() {
+    async fn real_request() {
         let gas_station =
             GnosisSafeGasStation::with_network_id("1", TestTransport::default()).unwrap();
-        let response = gas_station.gas_prices().wait().unwrap();
+        let response = gas_station.gas_prices().await.unwrap();
         println!("{:?}", response);
         for i in 0..10 {
             let time_limit = Duration::from_secs(i * 10);
