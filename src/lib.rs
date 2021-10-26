@@ -16,6 +16,8 @@ pub mod priority;
 //#[cfg(feature = "web3_")]
 pub mod nativegasestimator;
 
+#[cfg(feature = "tokio_")]
+pub use blocknative::BlockNative;
 pub use ethgasstation::EthGasStation;
 pub use gas_price::{EstimatedGasPrice, GasPrice1559};
 pub use gasnow::GasNowGasStation;

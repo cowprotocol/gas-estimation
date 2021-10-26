@@ -4,21 +4,20 @@ use crate::GasPrice1559;
 
 use super::{EstimatedGasPrice, GasPriceEstimating};
 use anyhow::{anyhow, Context, Result};
-use primitive_types::U256;
 use serde::{de::Error, Deserialize, Deserializer};
 use std::f64::consts::{E, PI};
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::task::{self, JoinHandle};
-use web3::Transport;
+use web3::{Transport, types::U256};
 
 const SAMPLE_MIN_PERCENTILE: f64 = 10.0; // sampled percentile range of exponentially weighted baseFee history
 const SAMPLE_MAX_PERCENTILE: f64 = 30.0;
 
-const MAX_REWARD_PERCENTILE: usize = 50; // effective reward value to be selected from each individual block
-const MIN_BLOCK_PERCENTILE: f64 = 40.0; // economical priority fee to be selected from sorted individual block reward percentiles
-const MAX_BLOCK_PERCENTILE: f64 = 70.0; // urgent priority fee to be selected from sorted individual block reward percentiles
+const MAX_REWARD_PERCENTILE: usize = 80; // effective reward value to be selected from each individual block
+const MIN_BLOCK_PERCENTILE: f64 = 20.0; // economical priority fee to be selected from sorted individual block reward percentiles
+const MAX_BLOCK_PERCENTILE: f64 = 80.0; // urgent priority fee to be selected from sorted individual block reward percentiles
 
 const MAX_TIME_FACTOR: f64 = 128.0; // highest timeFactor in the returned list of suggestions (power of 2)
 const EXTRA_PRIORITY_FEE_RATIO: f64 = 0.25; // extra priority fee offered in case of expected baseFee rise
@@ -107,11 +106,16 @@ impl NativeGasEstimator {
         //do one calculation to initially populate cache before any request for gas price estimation is received from our users
         match suggest_fee(transport.clone()).await {
             Ok(fees) => {
+                // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does)
+                let fees = fees
+                    .into_iter()
+                    .map(|(time_limit, gas_price)| (time_limit, gas_price.bump_cap(2.0)))
+                    .collect();
+
                 *cached_response_clone.lock().unwrap() = CachedResponse {
                     time: Instant::now(),
                     data: fees,
                 };
-                println!("cache updated!");
             }
             Err(e) => {
                 tracing::warn!(?e, "failed to calculate initial fees");
@@ -125,11 +129,16 @@ impl NativeGasEstimator {
                 tokio::time::sleep(RATE_LIMIT).await;
                 match suggest_fee(transport.clone()).await {
                     Ok(fees) => {
+                        // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does)
+                        let fees = fees
+                            .into_iter()
+                            .map(|(time_limit, gas_price)| (time_limit, gas_price.bump_cap(2.0)))
+                            .collect();
+
                         *cached_response_clone.lock().unwrap() = CachedResponse {
                             time: Instant::now(),
                             data: fees,
                         };
-                        println!("cache updated!");
                     }
                     Err(e) => tracing::warn!(?e, "failed to calculate fees"),
                 }
@@ -156,10 +165,9 @@ async fn suggest_fee<T: Transport + Send + Sync>(
         serde_json::from_value(response).context("deserialize failed")?;
 
     // Initialize
-    let mut base_fee: Vec<U256> = vec![];
+    let mut base_fee = fee_history.base_fee_per_gas.clone();
     let mut order: Vec<usize> = vec![];
     for i in 0..fee_history.base_fee_per_gas.len() {
-        base_fee.push(fee_history.base_fee_per_gas[i]); //this can be copied
         order.push(i);
     }
 
@@ -381,6 +389,7 @@ mod tests {
 
     use super::super::blocknative::BlockNative;
     use super::NativeGasEstimator;
+    use assert_approx_eq::assert_approx_eq;
     use std::time::Duration;
     use std::{fs::File, io::Write};
 
@@ -416,7 +425,7 @@ mod tests {
                 .await
                 .unwrap_or_default();
 
-            let serialized = serde_json::to_string(&res).unwrap() + "NATIVE \n";
+            let serialized = serde_json::to_string(&res).unwrap() + "\n";
             file.write_all(serialized.as_bytes()).unwrap();
             println!("res written native");
 
@@ -425,9 +434,24 @@ mod tests {
                 .await
                 .unwrap_or_default();
 
-            let serialized = serde_json::to_string(&res2).unwrap() + "BLOCKNATIVE \n";
+            let serialized = serde_json::to_string(&res2).unwrap() + "\n";
             file.write_all(serialized.as_bytes()).unwrap();
             println!("res written blocknative");
         }
+    }
+
+    #[test]
+    fn sampling_curve_minimum() {
+        assert_eq!(sampling_curve(0.0), 0.0);
+    }
+
+    #[test]
+    fn sampling_curve_maximum() {
+        assert_eq!(sampling_curve(100.0), 1.0);
+    }
+
+    #[test]
+    fn sampling_curve_expected() {
+        assert_approx_eq!(sampling_curve(15.0), 0.5);
     }
 }
