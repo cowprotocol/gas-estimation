@@ -9,7 +9,7 @@ use std::{
 
 // Gas price estimation with https://www.gasnow.org/ , api at https://taichi.network/#gasnow .
 
-const API_URI: &str = "https://www.gasnow.org/api/v3/gas/price";
+const API_URI: &str = "https://etherchain.org/api/gasnow";
 const RATE_LIMIT: Duration = Duration::from_secs(15);
 
 pub struct GasNowGasStation<T> {
@@ -128,10 +128,9 @@ impl<T: Transport> GasPriceEstimating for GasNowGasStation<T> {
 
 #[cfg(test)]
 mod tests {
-    use futures::FutureExt;
-
     use super::super::tests::{FutureWaitExt as _, TestTransport};
     use super::*;
+    use futures::FutureExt;
     use std::future::{ready, Pending};
 
     fn panic_future() -> Pending<Result<Response>> {
@@ -227,13 +226,13 @@ mod tests {
     }
 
     // cargo test gasnow -- --ignored --nocapture
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn real_request() {
+    async fn real_request() {
         let gasnow = GasNowGasStation::new(TestTransport::default());
         loop {
             let before = Instant::now();
-            let response = gasnow.estimate().wait();
+            let response = gasnow.estimate().await;
             println!("{:?} in {} s", response, before.elapsed().as_secs_f32());
             std::thread::sleep(Duration::from_secs(1));
         }

@@ -77,15 +77,15 @@ fn estimate_with_limits(response: &Response, time_limit: Duration) -> Result<Est
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{FutureWaitExt as _, TestTransport};
+    use super::super::tests::TestTransport;
     use super::*;
 
     // cargo test -p services-core ethgasstation -- --ignored --nocapture
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn real_request() {
+    async fn real_request() {
         let ethgasstation = EthGasStation::new(TestTransport::default());
-        let response = ethgasstation.gas_price().wait().unwrap();
+        let response = ethgasstation.gas_price().await.unwrap();
         println!("{:?}", response);
         for i in 0..10 {
             let time_limit = Duration::from_secs(i * 10);
