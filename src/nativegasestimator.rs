@@ -227,7 +227,7 @@ async fn collect_rewards<T: Transport + Send + Sync>(
                 .fee_history(
                     block_count.into(),
                     (first_block + ptr as u64).into(),
-                    Some(percentiles.clone()).into(),
+                    Some(percentiles.clone()),
                 )
                 .await?;
 
@@ -263,11 +263,7 @@ async fn collect_rewards<T: Transport + Send + Sync>(
 
 // maxBlockCount returns the number of consecutive blocks suitable for priority fee suggestion (gasUsedRatio non-zero
 // and not higher than 0.9).
-fn max_block_count(
-    gas_used_ratio: &Vec<f64>,
-    mut last_index: usize,
-    mut need_blocks: usize,
-) -> usize {
+fn max_block_count(gas_used_ratio: &[f64], mut last_index: usize, mut need_blocks: usize) -> usize {
     let mut block_count = 0;
 
     while need_blocks > 0 {
@@ -288,7 +284,7 @@ fn max_block_count(
 
 // suggestPriorityFee suggests a priority fee (maxPriorityFeePerGas) value that's usually sufficient for blocks that
 // are not full.
-fn suggest_priority_fee(rewards: &Vec<u64>, time_factor: f64) -> f64 {
+fn suggest_priority_fee(rewards: &[u64], time_factor: f64) -> f64 {
     if rewards.is_empty() {
         return FALLBACK_PRIORITY_FEE;
     }
@@ -302,7 +298,7 @@ fn suggest_priority_fee(rewards: &Vec<u64>, time_factor: f64) -> f64 {
 
 // predictMinBaseFee calculates an average of base fees in the sampleMinPercentile to sampleMaxPercentile percentile
 // range of recent base fee history, each block weighted with an exponential time function based on timeFactor.
-fn predict_min_base_fee(base_fee: &Vec<U256>, order: &Vec<usize>, time_div: f64) -> f64 {
+fn predict_min_base_fee(base_fee: &[U256], order: &[usize], time_div: f64) -> f64 {
     if time_div < 1e6 {
         return base_fee.last().copied().unwrap_or_default().low_u64() as f64;
     }
@@ -476,12 +472,12 @@ mod tests {
 
     #[test]
     fn sampling_curve_minimum() {
-        assert_eq!(sampling_curve(0.0), 0.0);
+        assert_approx_eq!(sampling_curve(0.0), 0.0);
     }
 
     #[test]
     fn sampling_curve_maximum() {
-        assert_eq!(sampling_curve(100.0), 1.0);
+        assert_approx_eq!(sampling_curve(100.0), 1.0);
     }
 
     #[test]

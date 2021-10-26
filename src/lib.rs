@@ -10,9 +10,9 @@ pub mod gas_price;
 pub mod gasnow;
 pub mod gnosis_safe;
 mod linear_interpolation;
-pub mod priority;
 #[cfg(feature = "web3_")]
 pub mod nativegasestimator;
+pub mod priority;
 
 #[cfg(feature = "tokio_")]
 pub use blocknative::BlockNative;
