@@ -8,8 +8,6 @@ pub mod eth_node;
 pub mod ethgasstation;
 pub mod gas_price;
 pub mod gasnow;
-#[cfg(feature = "tokio_")]
-pub mod gasnow_websocket;
 pub mod gnosis_safe;
 mod linear_interpolation;
 pub mod priority;
@@ -17,8 +15,6 @@ pub mod priority;
 pub use ethgasstation::EthGasStation;
 pub use gas_price::{EstimatedGasPrice, GasPrice1559};
 pub use gasnow::GasNowGasStation;
-#[cfg(feature = "tokio_")]
-pub use gasnow_websocket::GasNowWebSocketGasStation;
 pub use gnosis_safe::GnosisSafeGasStation;
 pub use priority::PriorityGasPriceEstimating;
 
