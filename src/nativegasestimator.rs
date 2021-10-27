@@ -1,7 +1,7 @@
 //! Native gas price estimator based on the https://github.com/zsfelfoldi/feehistory/blob/main/docs/feeOracle.md
 
 use super::{linear_interpolation, EstimatedGasPrice, GasPrice1559, GasPriceEstimating};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 use std::{
     convert::TryInto,
     f64::consts::{E, PI},
@@ -217,7 +217,7 @@ async fn collect_rewards<T: Transport + Send + Sync>(
     let mut need_blocks: usize = 5;
     let mut rewards = vec![];
     while need_blocks > 0 {
-        let block_count = max_block_count(&gas_used_ratio, ptr, need_blocks);
+        let block_count = max_block_count(&gas_used_ratio, ptr, need_blocks)?;
         if block_count > 0 {
             // feeHistory API call with reward percentile specified is expensive and therefore is only requested for a few
             // non-full recent blocks.
@@ -263,23 +263,17 @@ async fn collect_rewards<T: Transport + Send + Sync>(
 
 // maxBlockCount returns the number of consecutive blocks suitable for priority fee suggestion (gasUsedRatio non-zero
 // and not higher than 0.9).
-fn max_block_count(gas_used_ratio: &[f64], mut last_index: usize, mut need_blocks: usize) -> usize {
-    let mut block_count = 0;
-
-    while need_blocks > 0 {
-        if gas_used_ratio[last_index] == 0.0 || gas_used_ratio[last_index] > 0.9 {
-            break;
-        }
-
-        block_count += 1;
-
-        if last_index == 0 {
-            break;
-        }
-        last_index -= 1;
-        need_blocks -= 1;
-    }
-    block_count
+fn max_block_count(gas_used_ratio: &[f64], last_index: usize, need_blocks: usize) -> Result<usize> {
+    ensure!(
+        gas_used_ratio.len() > last_index,
+        "max_block_count invalid input"
+    );
+    Ok((0..std::cmp::min(last_index + 1, need_blocks))
+        .into_iter()
+        .take_while(|i| {
+            !(gas_used_ratio[last_index - i] == 0.0 || gas_used_ratio[last_index - i] > 0.9)
+        })
+        .count())
 }
 
 // suggestPriorityFee suggests a priority fee (maxPriorityFeePerGas) value that's usually sufficient for blocks that
@@ -483,5 +477,32 @@ mod tests {
     #[test]
     fn sampling_curve_expected() {
         assert_approx_eq!(sampling_curve(15.0), 0.5);
+    }
+
+    #[test]
+    fn max_block_count_test() {
+        assert_eq!(
+            max_block_count(&[0.5, 0.6, 0.7, 0.6, 0.5, 0.4, 0.4], 3, 5).unwrap(),
+            4usize
+        );
+        assert_eq!(
+            max_block_count(&[0.5, 0.6, 0.7, 0.6, 0.5, 0.4, 0.4], 4, 5).unwrap(),
+            5usize
+        );
+        assert_eq!(
+            max_block_count(&[0.5, 0.6, 0.7, 0.6, 0.5, 0.4, 0.4], 5, 5).unwrap(),
+            5usize
+        );
+
+        assert_eq!(
+            max_block_count(&[0.5, 0.6, 0.7, 0.6], 3, 5).unwrap(),
+            4usize
+        );
+        assert_eq!(
+            max_block_count(&[0.5, 0.6, 0.7, 0.6], 4, 5)
+                .unwrap_err()
+                .to_string(),
+            "max_block_count invalid input"
+        );
     }
 }
