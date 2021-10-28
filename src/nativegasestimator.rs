@@ -85,8 +85,8 @@ impl NativeGasEstimator {
                     data: fees,
                 };
             }
-            Err(e) => {
-                tracing::warn!(?e, "failed to calculate initial fees");
+            Err(err) => {
+                tracing::warn!(?err, "failed to calculate initial fees");
                 return Err(anyhow!("failed to calculate initial fees"));
             }
         }
@@ -108,7 +108,7 @@ impl NativeGasEstimator {
                             data: fees,
                         };
                     }
-                    Err(e) => tracing::warn!(?e, "failed to calculate fees"),
+                    Err(err) => tracing::warn!(?err, "failed to calculate fees"),
                 }
             }
         });

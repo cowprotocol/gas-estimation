@@ -136,8 +136,8 @@ impl BlockNative {
                     data: response.gwei_to_wei(),
                 };
             }
-            Err(e) => {
-                tracing::warn!(?e, "failed to get initial response from blocknative");
+            Err(err) => {
+                tracing::warn!(?err, "failed to get initial response from blocknative");
                 return Err(anyhow!("failed to get initial response from blocknative"));
             }
         }
@@ -153,7 +153,7 @@ impl BlockNative {
                             data: response.gwei_to_wei(),
                         };
                     }
-                    Err(e) => tracing::warn!(?e, "failed to get response from blocknative"),
+                    Err(err) => tracing::warn!(?err, "failed to get response from blocknative"),
                 }
             }
         });
