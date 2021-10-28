@@ -48,9 +48,9 @@ impl Default for Params {
         Self {
             sample_min_percentile: 10.0,
             sample_max_percentile: 30.0,
-            max_reward_percentile: 50,
-            min_block_percentile: 40.0,
-            max_block_percentile: 70.0,
+            max_reward_percentile: 20,
+            min_block_percentile: 30.0,
+            max_block_percentile: 60.0,
             max_time_factor: 128.0,
             extra_priority_fee_ratio: 0.25,
             extra_priority_fee_boost: 1559.0,
@@ -179,7 +179,7 @@ async fn suggest_fee<T: Transport + Send + Sync>(
     // priority fee might not be enough to get included. The last (pending) block is also assumed to end up being full
     // in order to give some upwards bias for urgent suggestions.
     base_fee[fee_history.base_fee_per_gas.len() - 1] *= 9 / 8;
-    for i in fee_history.gas_used_ratio.len() - 1..=0 {
+    for i in (0..=fee_history.gas_used_ratio.len() - 1).rev() {
         if fee_history.gas_used_ratio[i] > 0.9 {
             base_fee[i] = base_fee[i + 1];
         }
@@ -326,7 +326,7 @@ fn suggest_priority_fee(rewards: &[u64], time_factor: f64, params: &Params) -> f
 // predictMinBaseFee calculates an average of base fees in the sampleMinPercentile to sampleMaxPercentile percentile
 // range of recent base fee history, each block weighted with an exponential time function based on timeFactor.
 fn predict_min_base_fee(base_fee: &[U256], order: &[usize], time_div: f64, params: &Params) -> f64 {
-    if time_div < 1e6 {
+    if time_div < 1e-6 {
         return base_fee.last().copied().unwrap_or_default().low_u64() as f64;
     }
 
@@ -336,7 +336,8 @@ fn predict_min_base_fee(base_fee: &[U256], order: &[usize], time_div: f64, param
     let mut result = 0.0;
     let mut sampling_curve_last = 0.0;
     for order_elem in order {
-        sum_weight += pending_weight * E.powf((order_elem - base_fee.len() + 1) as f64 / time_div);
+        sum_weight +=
+            pending_weight * E.powf((*order_elem as f64 - base_fee.len() as f64 + 1.0) / time_div);
         let sampling_curve_value = sampling_curve(sum_weight * 100.0, params);
         result +=
             (sampling_curve_value - sampling_curve_last) * base_fee[*order_elem].low_u64() as f64;
