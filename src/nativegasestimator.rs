@@ -20,7 +20,7 @@ const CACHED_RESPONSE_VALIDITY: Duration = Duration::from_secs(60);
 //rate limit of ethereum L1 nodes
 const RATE_LIMIT: Duration = Duration::from_secs(5);
 
-// Parameters for Native gas price estimator algorithm
+/// Parameters for Native gas price estimator algorithm
 #[derive(Debug, Clone)]
 pub struct Params {
     // sampled percentile range of exponentially weighted baseFee history
@@ -41,6 +41,10 @@ pub struct Params {
     pub extra_priority_fee_boost: f64,
     // priority fee offered when there are no recent transactions
     pub fallback_priority_fee: f64,
+    // a coefficient to multiply max_fee_per_gas with, in order to increase chances of transaction inclusion
+    pub bump_cap_coefficient: f64,
+    // number of blocks to consider for fee history calculation
+    pub fee_history_blocks: u64,
 }
 
 impl Default for Params {
@@ -55,6 +59,8 @@ impl Default for Params {
             extra_priority_fee_ratio: 0.25,
             extra_priority_fee_boost: 1559.0,
             fallback_priority_fee: 2e9,
+            bump_cap_coefficient: 2.0,
+            fee_history_blocks: 300,
         }
     }
 }
@@ -107,7 +113,9 @@ impl NativeGasEstimator {
                 // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does)
                 let fees = fees
                     .into_iter()
-                    .map(|(time_limit, gas_price)| (time_limit, gas_price.bump_cap(2.0)))
+                    .map(|(time_limit, gas_price)| {
+                        (time_limit, gas_price.bump_cap(params.bump_cap_coefficient))
+                    })
                     .collect();
 
                 *cached_response_clone.lock().unwrap() = CachedResponse {
@@ -130,7 +138,9 @@ impl NativeGasEstimator {
                         // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does)
                         let fees = fees
                             .into_iter()
-                            .map(|(time_limit, gas_price)| (time_limit, gas_price.bump_cap(2.0)))
+                            .map(|(time_limit, gas_price)| {
+                                (time_limit, gas_price.bump_cap(params.bump_cap_coefficient))
+                            })
                             .collect();
 
                         *cached_response_clone.lock().unwrap() = CachedResponse {
@@ -152,7 +162,7 @@ impl NativeGasEstimator {
 
 // suggest_fee returns fee suggestion at the latest block
 // feeHistory API call without a reward percentile specified is cheap even with a light client backend because it
-// only needs block headers. Therefore we can afford to fetch a hundred blocks of base fee history in order to make
+// only needs block headers. Therefore we can afford to fetch high number of blocks of base fee history in order to make
 // meaningful estimates on variable time scales.
 async fn suggest_fee<T: Transport + Send + Sync>(
     transport: T,
@@ -162,7 +172,7 @@ async fn suggest_fee<T: Transport + Send + Sync>(
     let fee_history = web3
         .eth()
         .fee_history(
-            300.into(),
+            params.fee_history_blocks.into(),
             serde_json::from_value::<BlockNumber>("latest".into()).unwrap(),
             None,
         )
@@ -170,17 +180,18 @@ async fn suggest_fee<T: Transport + Send + Sync>(
 
     // Initialize
     let mut base_fee = fee_history.base_fee_per_gas.clone();
-    let mut order: Vec<usize> = vec![];
-    for i in 0..fee_history.base_fee_per_gas.len() {
-        order.push(i);
-    }
+    let mut order = (0..fee_history.base_fee_per_gas.len()).collect::<Vec<_>>();
 
     // If a block is full then the baseFee of the next block is copied. The reason is that in full blocks the minimal
     // priority fee might not be enough to get included. The last (pending) block is also assumed to end up being full
     // in order to give some upwards bias for urgent suggestions.
+    ensure!(
+        fee_history.base_fee_per_gas.len() == fee_history.gas_used_ratio.len() + 1,
+        "base_fee_per_gas not paired with gas_used_ratio"
+    );
     base_fee[fee_history.base_fee_per_gas.len() - 1] *= 9 / 8;
-    for i in (0..=fee_history.gas_used_ratio.len() - 1).rev() {
-        if fee_history.gas_used_ratio[i] > 0.9 {
+    for (i, gas_ratio_used) in fee_history.gas_used_ratio.iter().enumerate().rev() {
+        if *gas_ratio_used > 0.9 {
             base_fee[i] = base_fee[i + 1];
         }
     }
@@ -455,10 +466,7 @@ mod tests {
     async fn real_request() {
         let mut file = File::create("foo.txt").unwrap();
 
-        let transport = web3::transports::Http::new(
-            "https://mainnet.infura.io/v3/3b497b3196e4468288eb5c7f239e86f4",
-        )
-        .unwrap();
+        let transport = web3::transports::Http::new(&std::env::var("NODE_URL").unwrap()).unwrap();
 
         //native gas estimator
         let native_gas_estimator = NativeGasEstimator::new(transport, None).await.unwrap();
@@ -467,7 +475,8 @@ mod tests {
         let mut header = http::header::HeaderMap::new();
         header.insert(
             "AUTHORIZATION",
-            http::header::HeaderValue::from_str("093e3f9c-bd8c-43c6-a6cd-3540fb3a2b70").unwrap(), //or replace with api_key
+            http::header::HeaderValue::from_str(&std::env::var("BLOCKNATIVE_API_KEY").unwrap())
+                .unwrap(), //or replace with api_key
         );
         let blocknative = BlockNative::new(TestTransport::default(), header)
             .await
