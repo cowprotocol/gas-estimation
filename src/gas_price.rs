@@ -1,6 +1,7 @@
 /// Gas price received from the gas price estimators.
+use serde::Serialize;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd, Serialize)]
 /// Main gas price structure.
 /// Provide estimated gas prices for both legacy and eip1559 transactions.
 pub struct EstimatedGasPrice {
@@ -52,6 +53,14 @@ impl EstimatedGasPrice {
         }
     }
 
+    // Bump max gas price by factor.
+    pub fn bump_cap(self, factor: f64) -> Self {
+        Self {
+            legacy: self.legacy * factor,
+            eip1559: self.eip1559.map(|x| x.bump_cap(factor)),
+        }
+    }
+
     // Ceil gas price (since its defined as float).
     pub fn ceil(self) -> Self {
         Self {
@@ -71,7 +80,7 @@ impl EstimatedGasPrice {
 
 /// Gas price structure for 1559 transactions.
 /// Contains base_fee_per_gas as an essential part of the gas price estimation.
-#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd, Serialize)]
 pub struct GasPrice1559 {
     // Estimated base fee for the pending block (block currently being mined)
     pub base_fee_per_gas: f64,
@@ -87,6 +96,14 @@ impl GasPrice1559 {
         Self {
             max_fee_per_gas: self.max_fee_per_gas * factor,
             max_priority_fee_per_gas: self.max_priority_fee_per_gas * factor,
+            ..self
+        }
+    }
+
+    // Bump max gas price by factor.
+    pub fn bump_cap(self, factor: f64) -> Self {
+        Self {
+            max_fee_per_gas: self.max_fee_per_gas * factor,
             ..self
         }
     }
