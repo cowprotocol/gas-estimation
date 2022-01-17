@@ -1,3 +1,4 @@
+use ethcontract::GasPrice;
 /// Gas price received from the gas price estimators.
 use serde::Serialize;
 
@@ -125,6 +126,16 @@ impl GasPrice1559 {
                 .max_priority_fee_per_gas
                 .min(self.max_fee_per_gas.min(cap)), // enforce max_priority_fee_per_gas <= max_fee_per_gas
             ..self
+        }
+    }
+}
+
+impl From<EstimatedGasPrice> for GasPrice {
+    fn from(gas_price: EstimatedGasPrice) -> Self {
+        if let Some(eip1559) = gas_price.eip1559 {
+            (eip1559.max_fee_per_gas, eip1559.max_priority_fee_per_gas).into()
+        } else {
+            gas_price.legacy.into()
         }
     }
 }
