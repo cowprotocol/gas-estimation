@@ -133,7 +133,10 @@ impl NativeGasEstimator {
         let handle = task::spawn(async move {
             loop {
                 tokio::time::sleep(RATE_LIMIT).await;
-                match suggest_fee(transport.clone(), &params).await {
+                let start = Instant::now();
+                let fee = suggest_fee(transport.clone(), &params).await;
+                tracing::debug!("suggested fees in {} s", start.elapsed().as_secs_f32());
+                match fee {
                     Ok(fees) => {
                         // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does)
                         let fees = fees
