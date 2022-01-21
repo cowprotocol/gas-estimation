@@ -177,7 +177,7 @@ async fn suggest_fee<T: Transport + Send + Sync>(
         .fee_history(
             params.fee_history_blocks.into(),
             serde_json::from_value::<BlockNumber>("latest".into()).unwrap(),
-            None,
+            Some(vec![]),
         )
         .await?;
 
