@@ -231,7 +231,7 @@ fn estimate_with_limits(
             )
             .collect::<Vec<(f64, f64)>>();
 
-        return Ok(EstimatedGasPrice {
+        return EstimatedGasPrice {
             legacy: linear_interpolation::interpolate(
                 time_limit.as_secs_f64(),
                 gas_price_points.as_slice().try_into()?,
@@ -247,7 +247,8 @@ fn estimate_with_limits(
                 ),
                 base_fee_per_gas: block.base_fee_per_gas,
             }),
-        });
+        }
+        .validate();
     }
 
     Err(anyhow!("no valid response exist"))

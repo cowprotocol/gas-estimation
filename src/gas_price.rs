@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 /// Gas price received from the gas price estimators.
 use serde::Serialize;
 
@@ -29,20 +30,22 @@ impl EstimatedGasPrice {
 
     // Maximum gas price willing to pay for the transaction.
     pub fn cap(&self) -> f64 {
-        if let Some(gas_price) = &self.eip1559 {
-            gas_price.max_fee_per_gas
-        } else {
-            self.legacy
-        }
+        self.eip1559
+            .map(|x| x.max_fee_per_gas)
+            .unwrap_or(self.legacy)
     }
 
     // Maximum tip willing to pay to miners for transaction.
     pub fn tip(&self) -> f64 {
-        if let Some(gas_price) = &self.eip1559 {
-            gas_price.max_priority_fee_per_gas
-        } else {
-            self.legacy
-        }
+        self.eip1559
+            .map(|x| x.max_priority_fee_per_gas)
+            .unwrap_or(self.legacy)
+    }
+
+    pub fn base_fee(&self) -> f64 {
+        self.eip1559
+            .map(|x| x.base_fee_per_gas)
+            .unwrap_or(self.legacy)
     }
 
     // Bump gas price by factor.
@@ -74,6 +77,21 @@ impl EstimatedGasPrice {
         Self {
             legacy: self.legacy.min(cap),
             eip1559: self.eip1559.map(|x| x.limit_cap(cap)),
+        }
+    }
+
+    // Validate against rules defined in https://eips.ethereum.org/EIPS/eip-1559
+    // max_fee_per_gas >= max_priority_fee_per_gas
+    // max_fee_per_gas >= base_fee_per_gas
+    pub fn is_valid(&self) -> bool {
+        self.cap() >= self.tip() && self.cap() >= self.base_fee()
+    }
+
+    // Validate and build Result based on the validation result
+    pub fn validate(self) -> Result<EstimatedGasPrice> {
+        match self.is_valid() {
+            true => Ok(self),
+            false => Err(anyhow!("invalid gas price values: {:?}", self)),
         }
     }
 }

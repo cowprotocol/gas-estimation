@@ -436,7 +436,7 @@ fn estimate_with_limits(
         return Err(anyhow!("no eip1559 estimate exist"));
     };
 
-    return Ok(EstimatedGasPrice {
+    EstimatedGasPrice {
         eip1559: Some(GasPrice1559 {
             max_fee_per_gas: linear_interpolation::interpolate(
                 time_limit.as_secs_f64(),
@@ -449,7 +449,8 @@ fn estimate_with_limits(
             base_fee_per_gas,
         }),
         ..Default::default()
-    });
+    }
+    .validate()
 }
 
 #[cfg(test)]
