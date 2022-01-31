@@ -87,7 +87,7 @@ impl EstimatedGasPrice {
     pub fn valid(self) -> Result<EstimatedGasPrice> {
         match self.is_valid() {
             true => Ok(self),
-            false => Err(anyhow!("invalid values returned")),
+            false => Err(anyhow!("invalid gas price values: {:?}", self)),
         }
     }
 }
