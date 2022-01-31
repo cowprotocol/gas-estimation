@@ -80,11 +80,15 @@ impl EstimatedGasPrice {
         }
     }
 
+    // Validate against rules defined in https://eips.ethereum.org/EIPS/eip-1559
+    // max_fee_per_gas >= max_priority_fee_per_gas
+    // max_fee_per_gas >= base_fee_per_gas
     pub fn is_valid(&self) -> bool {
         self.cap() >= self.tip() && self.cap() >= self.base_fee()
     }
 
-    pub fn valid(self) -> Result<EstimatedGasPrice> {
+    // Validate and build Result based on the validation result
+    pub fn validate(self) -> Result<EstimatedGasPrice> {
         match self.is_valid() {
             true => Ok(self),
             false => Err(anyhow!("invalid gas price values: {:?}", self)),

@@ -248,7 +248,7 @@ fn estimate_with_limits(
                 base_fee_per_gas: block.base_fee_per_gas,
             }),
         }
-        .valid();
+        .validate();
     }
 
     Err(anyhow!("no valid response exist"))

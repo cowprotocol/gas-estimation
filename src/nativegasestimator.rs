@@ -450,7 +450,7 @@ fn estimate_with_limits(
         }),
         ..Default::default()
     }
-    .valid()
+    .validate()
 }
 
 #[cfg(test)]
