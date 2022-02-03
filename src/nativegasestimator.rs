@@ -6,7 +6,6 @@ use std::{
     convert::TryInto,
     f64::consts::{E, PI},
     fmt::Debug,
-    ops::Mul,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -112,7 +111,7 @@ impl NativeGasEstimator {
                 let fees = fees
                     .into_iter()
                     .map(|(time_limit, gas_price)| {
-                        (time_limit, gas_price.set_cap(gas_price.base_fee().mul(2.)))
+                        (time_limit, gas_price.set_cap(gas_price.base_fee() * 2.))
                     })
                     .collect();
 
@@ -140,7 +139,7 @@ impl NativeGasEstimator {
                         let fees = fees
                             .into_iter()
                             .map(|(time_limit, gas_price)| {
-                                (time_limit, gas_price.set_cap(gas_price.base_fee().mul(2.)))
+                                (time_limit, gas_price.set_cap(gas_price.base_fee() * 2.))
                             })
                             .collect();
 
