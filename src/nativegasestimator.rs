@@ -6,6 +6,7 @@ use std::{
     convert::TryInto,
     f64::consts::{E, PI},
     fmt::Debug,
+    ops::Mul,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -41,8 +42,6 @@ pub struct Params {
     pub extra_priority_fee_boost: f64,
     // priority fee offered when there are no recent transactions
     pub fallback_priority_fee: f64,
-    // a coefficient to multiply max_fee_per_gas with, in order to increase chances of transaction inclusion
-    pub bump_cap_coefficient: f64,
     // number of blocks to consider for fee history calculation
     pub fee_history_blocks: u64,
 }
@@ -59,7 +58,6 @@ impl Default for Params {
             extra_priority_fee_ratio: 0.25,
             extra_priority_fee_boost: 1559.0,
             fallback_priority_fee: 2e9,
-            bump_cap_coefficient: 2.0,
             fee_history_blocks: 300,
         }
     }
@@ -114,7 +112,7 @@ impl NativeGasEstimator {
                 let fees = fees
                     .into_iter()
                     .map(|(time_limit, gas_price)| {
-                        (time_limit, gas_price.bump_cap(params.bump_cap_coefficient))
+                        (time_limit, gas_price.set_cap(gas_price.base_fee().mul(2.)))
                     })
                     .collect();
 
@@ -142,7 +140,7 @@ impl NativeGasEstimator {
                         let fees = fees
                             .into_iter()
                             .map(|(time_limit, gas_price)| {
-                                (time_limit, gas_price.bump_cap(params.bump_cap_coefficient))
+                                (time_limit, gas_price.set_cap(gas_price.base_fee().mul(2.)))
                             })
                             .collect();
 
