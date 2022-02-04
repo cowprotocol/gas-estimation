@@ -35,6 +35,14 @@ impl EstimatedGasPrice {
             .unwrap_or(self.legacy)
     }
 
+    // Set maximum gas price willing to pay for the transaction.
+    pub fn set_cap(self, max_fee_per_gas: f64) -> Self {
+        Self {
+            legacy: max_fee_per_gas,
+            eip1559: self.eip1559.map(|x| x.set_cap(max_fee_per_gas)),
+        }
+    }
+
     // Maximum tip willing to pay to miners for transaction.
     pub fn tip(&self) -> f64 {
         self.eip1559
@@ -122,6 +130,14 @@ impl GasPrice1559 {
     pub fn bump_cap(self, factor: f64) -> Self {
         Self {
             max_fee_per_gas: self.max_fee_per_gas * factor,
+            ..self
+        }
+    }
+
+    // Set max gas price.
+    pub fn set_cap(self, max_fee_per_gas: f64) -> Self {
+        Self {
+            max_fee_per_gas,
             ..self
         }
     }

@@ -41,7 +41,7 @@ pub struct Params {
     pub extra_priority_fee_boost: f64,
     // priority fee offered when there are no recent transactions
     pub fallback_priority_fee: f64,
-    // a coefficient to multiply max_fee_per_gas with, in order to increase chances of transaction inclusion
+    // a coefficient to multiply base_fee_per_gas with, in order to increase chances of transaction inclusion
     pub bump_cap_coefficient: f64,
     // number of blocks to consider for fee history calculation
     pub fee_history_blocks: u64,
@@ -114,7 +114,10 @@ impl NativeGasEstimator {
                 let fees = fees
                     .into_iter()
                     .map(|(time_limit, gas_price)| {
-                        (time_limit, gas_price.bump_cap(params.bump_cap_coefficient))
+                        (
+                            time_limit,
+                            gas_price.set_cap(gas_price.base_fee() * params.bump_cap_coefficient),
+                        )
                     })
                     .collect();
 
@@ -142,7 +145,12 @@ impl NativeGasEstimator {
                         let fees = fees
                             .into_iter()
                             .map(|(time_limit, gas_price)| {
-                                (time_limit, gas_price.bump_cap(params.bump_cap_coefficient))
+                                (
+                                    time_limit,
+                                    gas_price.set_cap(
+                                        gas_price.base_fee() * params.bump_cap_coefficient,
+                                    ),
+                                )
                             })
                             .collect();
 
