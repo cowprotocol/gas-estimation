@@ -110,13 +110,16 @@ impl NativeGasEstimator {
         //do one calculation to initially populate cache before any request for gas price estimation is received from our users
         match suggest_fee(transport.clone(), &params).await {
             Ok(fees) => {
-                // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does)
+                // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does) or ~ 2 x max_fee_per_gas, whichever is higher
                 let fees = fees
                     .into_iter()
                     .map(|(time_limit, gas_price)| {
                         (
                             time_limit,
-                            gas_price.set_cap(gas_price.base_fee() * params.bump_cap_coefficient),
+                            gas_price.set_cap(
+                                gas_price.cap().max(gas_price.base_fee())
+                                    * params.bump_cap_coefficient,
+                            ),
                         )
                     })
                     .collect();
@@ -141,14 +144,15 @@ impl NativeGasEstimator {
                 tracing::debug!("suggested fees in {} s", start.elapsed().as_secs_f32());
                 match fee {
                     Ok(fees) => {
-                        // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does)
+                        // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does) or ~ 2 x max_fee_per_gas, whichever is higher
                         let fees = fees
                             .into_iter()
                             .map(|(time_limit, gas_price)| {
                                 (
                                     time_limit,
                                     gas_price.set_cap(
-                                        gas_price.base_fee() * params.bump_cap_coefficient,
+                                        gas_price.cap().max(gas_price.base_fee())
+                                            * params.bump_cap_coefficient,
                                     ),
                                 )
                             })
