@@ -1,4 +1,4 @@
-use super::{linear_interpolation, EstimatedGasPrice, GasPriceEstimating, Transport};
+use super::{linear_interpolation, GasPrice1559, GasPriceEstimating, Transport};
 use anyhow::{anyhow, Context, Result};
 use futures::lock::Mutex;
 use std::{
@@ -48,16 +48,19 @@ pub fn estimate_with_limits(
     _gas_limit: f64,
     time_limit: Duration,
     response: &ResponseData,
-) -> Result<EstimatedGasPrice> {
+) -> Result<GasPrice1559> {
     let points: &[(f64, f64)] = &[
         (RAPID.as_secs_f64(), response.rapid),
         (FAST.as_secs_f64(), response.fast),
         (STANDARD.as_secs_f64(), response.standard),
         (SLOW.as_secs_f64(), response.slow),
     ];
-    Ok(EstimatedGasPrice {
-        legacy: linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?),
-        ..Default::default()
+
+    let legacy = linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?);
+    Ok(GasPrice1559 {
+        base_fee_per_gas: 0.0,
+        max_fee_per_gas: legacy,
+        max_priority_fee_per_gas: legacy,
     })
 }
 
@@ -117,7 +120,7 @@ impl<T: Transport> GasPriceEstimating for GasNowGasStation<T> {
         &self,
         gas_limit: f64,
         time_limit: Duration,
-    ) -> Result<EstimatedGasPrice> {
+    ) -> Result<GasPrice1559> {
         let response = self
             .gas_price_with_cache(Instant::now(), || self.gas_price_without_cache())
             .await?
@@ -146,7 +149,7 @@ mod tests {
             slow: 1.0,
         };
         let result = estimate_with_limits(0., Duration::from_secs(20), &data).unwrap();
-        assert!(result.legacy > 3.0 && result.legacy < 4.0);
+        assert!(result.max_fee_per_gas > 3.0 && result.max_fee_per_gas < 4.0);
     }
 
     #[test]

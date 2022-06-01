@@ -1,7 +1,7 @@
 //! Gnosis Safe gas station `GasPriceEstimating` implementation.
 //! Api documentation at https://safe-relay.gnosis.io/ .
 
-use super::{linear_interpolation, EstimatedGasPrice, GasPriceEstimating, Transport};
+use super::{linear_interpolation, GasPrice1559, GasPriceEstimating, Transport};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use serde_with::rust::display_fromstr;
@@ -89,11 +89,13 @@ impl<T: Transport> GnosisSafeGasStation<T> {
 impl<T: Transport> GasPriceEstimating for GnosisSafeGasStation<T> {
     // The default implementation calls estimate_with_limits with 30 seconds which would result in
     // the standard time instead of fast. So to keep that behavior we implement it manually.
-    async fn estimate(&self) -> Result<EstimatedGasPrice> {
+    async fn estimate(&self) -> Result<GasPrice1559> {
         let response = self.gas_prices().await?;
-        Ok(EstimatedGasPrice {
-            legacy: response.fast,
-            ..Default::default()
+        let legacy = response.fast;
+        Ok(GasPrice1559 {
+            base_fee_per_gas: 0.0,
+            max_fee_per_gas: legacy,
+            max_priority_fee_per_gas: legacy,
         })
     }
 
@@ -101,7 +103,7 @@ impl<T: Transport> GasPriceEstimating for GnosisSafeGasStation<T> {
         &self,
         gas_limit: f64,
         time_limit: Duration,
-    ) -> Result<EstimatedGasPrice> {
+    ) -> Result<GasPrice1559> {
         let response = self.gas_prices().await?;
         let result = estimate_with_limits(&response, gas_limit, time_limit)?;
         Ok(result)
@@ -112,7 +114,7 @@ fn estimate_with_limits(
     response: &GasPrices,
     _gas_limit: f64,
     time_limit: Duration,
-) -> Result<EstimatedGasPrice> {
+) -> Result<GasPrice1559> {
     let points: &[(f64, f64)] = &[
         (0.0, response.fast * 2.0),
         (FAST_TIME, response.fast),
@@ -120,9 +122,12 @@ fn estimate_with_limits(
         (SAFE_LOW_TIME, response.safe_low),
         (600.0, response.safe_low / 2.0),
     ];
-    Ok(EstimatedGasPrice {
-        legacy: linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?),
-        ..Default::default()
+
+    let legacy = linear_interpolation::interpolate(time_limit.as_secs_f64(), points.try_into()?);
+    Ok(GasPrice1559 {
+        base_fee_per_gas: 0.0,
+        max_fee_per_gas: legacy,
+        max_priority_fee_per_gas: legacy,
     })
 }
 
@@ -164,7 +169,7 @@ pub mod tests {
             fastest: 500.0,
         };
         let estimate = estimate_with_limits(&price, 0.0, Duration::from_secs(30)).unwrap();
-        assert_approx_eq!(estimate.legacy, 300.0);
+        assert_approx_eq!(estimate.max_fee_per_gas, 300.0);
     }
 
     // cargo test -p services-core gnosis_safe -- --ignored --nocapture
@@ -181,7 +186,7 @@ pub mod tests {
             println!(
                 "gas price estimate for {} seconds: {} gwei",
                 time_limit.as_secs(),
-                price.legacy / 1e9,
+                price.max_fee_per_gas / 1e9,
             );
         }
     }

@@ -1,6 +1,8 @@
 //! Ethereum node `GasPriceEstimating` implementation.
 
-use super::{EstimatedGasPrice, GasPriceEstimating};
+use crate::GasPrice1559;
+
+use super::GasPriceEstimating;
 use anyhow::{Context, Result};
 use primitive_types::U256;
 use std::time::Duration;
@@ -16,7 +18,7 @@ where
         &self,
         _gas_limit: f64,
         _time_limit: Duration,
-    ) -> Result<EstimatedGasPrice> {
+    ) -> Result<GasPrice1559> {
         let legacy = self
             .eth()
             .gas_price()
@@ -24,9 +26,10 @@ where
             .context("failed to get web3 gas price")
             .map(U256::to_f64_lossy)?;
 
-        Ok(EstimatedGasPrice {
-            legacy,
-            ..Default::default()
+        Ok(GasPrice1559 {
+            base_fee_per_gas: 0.0,
+            max_fee_per_gas: legacy,
+            max_priority_fee_per_gas: legacy,
         })
     }
 }

@@ -17,7 +17,7 @@ pub mod priority;
 #[cfg(feature = "tokio_")]
 pub use blocknative::BlockNative;
 pub use ethgasstation::EthGasStation;
-pub use gas_price::{EstimatedGasPrice, GasPrice1559};
+pub use gas_price::GasPrice1559;
 pub use gasnow::GasNowGasStation;
 pub use gnosis_safe::GnosisSafeGasStation;
 pub use priority::PriorityGasPriceEstimating;
@@ -33,7 +33,7 @@ pub const DEFAULT_TIME_LIMIT: Duration = Duration::from_secs(30);
 #[async_trait::async_trait]
 pub trait GasPriceEstimating: Send + Sync {
     /// Estimate the gas price for a transaction to be mined "quickly".
-    async fn estimate(&self) -> Result<EstimatedGasPrice> {
+    async fn estimate(&self) -> Result<GasPrice1559> {
         self.estimate_with_limits(DEFAULT_GAS_LIMIT, DEFAULT_TIME_LIMIT)
             .await
     }
@@ -42,7 +42,7 @@ pub trait GasPriceEstimating: Send + Sync {
         &self,
         gas_limit: f64,
         time_limit: Duration,
-    ) -> Result<EstimatedGasPrice>;
+    ) -> Result<GasPrice1559>;
 }
 
 #[async_trait::async_trait]
