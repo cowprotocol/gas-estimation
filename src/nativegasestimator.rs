@@ -1,6 +1,6 @@
 //! Native gas price estimator based on the https://github.com/zsfelfoldi/feehistory/blob/main/docs/feeOracle.md
 
-use super::{linear_interpolation, EstimatedGasPrice, GasPrice1559, GasPriceEstimating};
+use super::{linear_interpolation, GasPrice1559, GasPriceEstimating};
 use anyhow::{anyhow, ensure, Result};
 use std::{
     convert::TryInto,
@@ -71,7 +71,7 @@ pub struct CachedResponse {
     // The time at which the cache is last time updated.
     time: Instant,
     // List of gas price estimates, coupled with time_limit
-    data: Vec<(f64, EstimatedGasPrice)>,
+    data: Vec<(f64, GasPrice1559)>,
 }
 
 impl Default for CachedResponse {
@@ -113,14 +113,13 @@ impl NativeGasEstimator {
                 // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does) or ~ 2 x max_fee_per_gas, whichever is higher
                 let fees = fees
                     .into_iter()
-                    .map(|(time_limit, gas_price)| {
-                        (
-                            time_limit,
-                            gas_price.set_cap(
-                                gas_price.cap().max(gas_price.base_fee())
-                                    * params.bump_cap_coefficient,
-                            ),
-                        )
+                    .map(|(time_limit, mut gas_price)| {
+                        // TODO: Double check with Dusan whether this makes sense. I haven't changed
+                        // the logic but this feels weird. (same in `handle` below)
+                        gas_price.max_fee_per_gas =
+                            gas_price.max_fee_per_gas.max(gas_price.base_fee_per_gas)
+                                * params.bump_cap_coefficient;
+                        (time_limit, gas_price)
                     })
                     .collect();
 
@@ -147,14 +146,11 @@ impl NativeGasEstimator {
                         // bump cap to be the ~ 2 x base_fee_per_gas (similar as BlockNative does) or ~ 2 x max_fee_per_gas, whichever is higher
                         let fees = fees
                             .into_iter()
-                            .map(|(time_limit, gas_price)| {
-                                (
-                                    time_limit,
-                                    gas_price.set_cap(
-                                        gas_price.cap().max(gas_price.base_fee())
-                                            * params.bump_cap_coefficient,
-                                    ),
-                                )
+                            .map(|(time_limit, mut gas_price)| {
+                                gas_price.max_fee_per_gas =
+                                    gas_price.max_fee_per_gas.max(gas_price.base_fee_per_gas)
+                                        * params.bump_cap_coefficient;
+                                (time_limit, gas_price)
                             })
                             .collect();
 
@@ -182,7 +178,7 @@ impl NativeGasEstimator {
 async fn suggest_fee<T: Transport + Send + Sync>(
     transport: T,
     params: &Params,
-) -> Result<Vec<(f64, EstimatedGasPrice)>> {
+) -> Result<Vec<(f64, GasPrice1559)>> {
     let web3 = web3::Web3::new(transport.clone());
     let fee_history = web3
         .eth()
@@ -240,18 +236,15 @@ async fn suggest_fee<T: Transport + Send + Sync>(
         }
         result.push((
             time_factor,
-            EstimatedGasPrice {
-                eip1559: Some(GasPrice1559 {
-                    base_fee_per_gas: fee_history
-                        .base_fee_per_gas
-                        .last()
-                        .copied()
-                        .unwrap_or_default()
-                        .low_u64() as f64,
-                    max_fee_per_gas: min_base_fee + priority_fee,
-                    max_priority_fee_per_gas: priority_fee + extra_fee,
-                }),
-                ..Default::default()
+            GasPrice1559 {
+                base_fee_per_gas: fee_history
+                    .base_fee_per_gas
+                    .last()
+                    .copied()
+                    .unwrap_or_default()
+                    .low_u64() as f64,
+                max_fee_per_gas: min_base_fee + priority_fee,
+                max_priority_fee_per_gas: priority_fee + extra_fee,
             },
         ));
 
@@ -397,7 +390,7 @@ impl GasPriceEstimating for NativeGasEstimator {
         &self,
         _gas_limit: f64,
         time_limit: Duration,
-    ) -> Result<EstimatedGasPrice> {
+    ) -> Result<GasPrice1559> {
         let cached_response = self.cached_response.lock().unwrap().clone();
 
         estimate_with_limits(time_limit, cached_response)
@@ -407,7 +400,7 @@ impl GasPriceEstimating for NativeGasEstimator {
 fn estimate_with_limits(
     time_limit: Duration,
     cached_response: CachedResponse,
-) -> Result<EstimatedGasPrice> {
+) -> Result<GasPrice1559> {
     if Instant::now().saturating_duration_since(cached_response.time) > CACHED_RESPONSE_VALIDITY {
         return Err(anyhow!("cached response is stale"));
     }
@@ -419,48 +412,25 @@ fn estimate_with_limits(
     let max_fee_per_gas_points = cached_response
         .data
         .iter()
-        .map(|(time_limit, gas_price)| {
-            (
-                *time_limit,
-                gas_price.eip1559.unwrap_or_default().max_fee_per_gas,
-            )
-        })
+        .map(|(time_limit, gas_price)| (*time_limit, gas_price.max_fee_per_gas))
         .collect::<Vec<(f64, f64)>>();
     let max_priority_fee_per_gas_points = cached_response
         .data
         .iter()
-        .map(|(time_limit, gas_price)| {
-            (
-                *time_limit,
-                gas_price
-                    .eip1559
-                    .unwrap_or_default()
-                    .max_priority_fee_per_gas,
-            )
-        })
+        .map(|(time_limit, gas_price)| (*time_limit, gas_price.max_priority_fee_per_gas))
         .collect::<Vec<(f64, f64)>>();
-    let base_fee_per_gas = if let Some(eip1559) = cached_response.data[0] //checked above
-        .1
-        .eip1559
-    {
-        eip1559.base_fee_per_gas
-    } else {
-        return Err(anyhow!("no eip1559 estimate exist"));
-    };
+    let base_fee_per_gas = cached_response.data[0].1.base_fee_per_gas;
 
-    EstimatedGasPrice {
-        eip1559: Some(GasPrice1559 {
-            max_fee_per_gas: linear_interpolation::interpolate(
-                time_limit.as_secs_f64(),
-                max_fee_per_gas_points.as_slice().try_into()?,
-            ),
-            max_priority_fee_per_gas: linear_interpolation::interpolate(
-                time_limit.as_secs_f64(),
-                max_priority_fee_per_gas_points.as_slice().try_into()?,
-            ),
-            base_fee_per_gas,
-        }),
-        ..Default::default()
+    GasPrice1559 {
+        max_fee_per_gas: linear_interpolation::interpolate(
+            time_limit.as_secs_f64(),
+            max_fee_per_gas_points.as_slice().try_into()?,
+        ),
+        max_priority_fee_per_gas: linear_interpolation::interpolate(
+            time_limit.as_secs_f64(),
+            max_priority_fee_per_gas_points.as_slice().try_into()?,
+        ),
+        base_fee_per_gas,
     }
     .validate()
 }

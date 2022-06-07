@@ -1,4 +1,4 @@
-use super::{EstimatedGasPrice, GasPriceEstimating};
+use super::{GasPrice1559, GasPriceEstimating};
 use anyhow::{anyhow, Result};
 use std::{
     future::Future,
@@ -34,10 +34,10 @@ impl PriorityGasPriceEstimating {
         Self { estimators }
     }
 
-    async fn prioritize<'a, T, F>(&'a self, operation: T) -> Result<EstimatedGasPrice>
+    async fn prioritize<'a, T, F>(&'a self, operation: T) -> Result<GasPrice1559>
     where
         T: Fn(&'a dyn GasPriceEstimating) -> F,
-        F: Future<Output = Result<EstimatedGasPrice>>,
+        F: Future<Output = Result<GasPrice1559>>,
     {
         for (i, estimator) in self.estimators.iter().enumerate() {
             match operation(estimator.estimator.as_ref()).await {
@@ -65,12 +65,12 @@ impl GasPriceEstimating for PriorityGasPriceEstimating {
         &self,
         gas_limit: f64,
         time_limit: Duration,
-    ) -> Result<EstimatedGasPrice> {
+    ) -> Result<GasPrice1559> {
         self.prioritize(|estimator| estimator.estimate_with_limits(gas_limit, time_limit))
             .await
     }
 
-    async fn estimate(&self) -> Result<EstimatedGasPrice> {
+    async fn estimate(&self) -> Result<GasPrice1559> {
         self.prioritize(|estimator| estimator.estimate()).await
     }
 }
@@ -88,16 +88,16 @@ mod tests {
         let estimator_1 = MockGasPriceEstimating::new();
 
         estimator_0.expect_estimate().times(1).returning(|| {
-            Ok(EstimatedGasPrice {
-                legacy: 1.0,
+            Ok(GasPrice1559 {
+                base_fee_per_gas: 1.0,
                 ..Default::default()
             })
         });
 
         let priority =
             PriorityGasPriceEstimating::new(vec![Box::new(estimator_0), Box::new(estimator_1)]);
-        let result = priority.estimate().now_or_never().unwrap().unwrap();
-        assert_approx_eq!(result.legacy, 1.0);
+        // estimator_1 has no expectation so would panic if called
+        priority.estimate().now_or_never().unwrap().unwrap();
     }
 
     #[test]
@@ -110,8 +110,8 @@ mod tests {
             .times(1)
             .returning(|| Err(anyhow!("")));
         estimator_1.expect_estimate().times(1).returning(|| {
-            Ok(EstimatedGasPrice {
-                legacy: 2.0,
+            Ok(GasPrice1559 {
+                base_fee_per_gas: 2.0,
                 ..Default::default()
             })
         });
@@ -119,7 +119,7 @@ mod tests {
         let priority =
             PriorityGasPriceEstimating::new(vec![Box::new(estimator_0), Box::new(estimator_1)]);
         let result = priority.estimate().now_or_never().unwrap().unwrap();
-        assert_approx_eq!(result.legacy, 2.0);
+        assert_approx_eq!(result.base_fee_per_gas, 2.0);
     }
 
     #[test]
