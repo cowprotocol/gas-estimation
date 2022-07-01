@@ -10,11 +10,13 @@ use std::{convert::TryInto, time::Duration};
 /// The default uris at which the gas station api is available under.
 const DEFAULT_MAINNET_URI: &str = "https://safe-relay.gnosis.io/api/v1/gas-station/";
 const DEFAULT_RINKEBY_URI: &str = "https://safe-relay.rinkeby.gnosis.io/api/v1/gas-station/";
+const DEFAULT_GOERLI_URI: &str = "https://safe-relay.goerli.gnosis.io/api/v1/gas-station/";
 
 pub fn api_url_from_network_id(network_id: &str) -> Option<&'static str> {
     match network_id {
         "1" => Some(DEFAULT_MAINNET_URI),
         "4" => Some(DEFAULT_RINKEBY_URI),
+        "5" => Some(DEFAULT_GOERLI_URI),
         _ => None,
     }
 }
@@ -172,13 +174,14 @@ pub mod tests {
         assert_approx_eq!(estimate.max_fee_per_gas, 300.0);
     }
 
-    // cargo test -p services-core gnosis_safe -- --ignored --nocapture
-    #[tokio::test]
-    #[ignore]
-    async fn real_request() {
-        let gas_station =
-            GnosisSafeGasStation::with_network_id("1", TestTransport::default()).unwrap();
+    async fn real_request(network_id: usize) {
+        let gas_station = GnosisSafeGasStation::with_network_id(
+            &network_id.to_string(),
+            TestTransport::default(),
+        )
+        .unwrap();
         let response = gas_station.gas_prices().await.unwrap();
+        println!("Network ID {}", network_id);
         println!("{:?}", response);
         for i in 0..10 {
             let time_limit = Duration::from_secs(i * 10);
@@ -189,5 +192,24 @@ pub mod tests {
                 price.max_fee_per_gas / 1e9,
             );
         }
+    }
+
+    // cargo test gnosis_safe -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn real_request_mainnet() {
+        real_request(1).await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_request_rinkeby() {
+        real_request(4).await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_request_goerli() {
+        real_request(5).await;
     }
 }
