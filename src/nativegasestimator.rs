@@ -1,7 +1,7 @@
 //! Native gas price estimator based on the https://github.com/zsfelfoldi/feehistory/blob/main/docs/feeOracle.md
 
 use super::{linear_interpolation, GasPrice1559, GasPriceEstimating};
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use std::{
     convert::TryInto,
     f64::consts::{E, PI},
@@ -216,7 +216,18 @@ async fn suggest_fee<T: Transport + Send + Sync>(
     };
 
     let rewards =
-        collect_rewards(transport, oldest_block, fee_history.gas_used_ratio, params).await?;
+        match collect_rewards(transport, oldest_block, fee_history.gas_used_ratio, params).await {
+            Ok(rewards) => rewards,
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "Failed to collect rewards possibly,\
+                     because node doesn't follow the spec. \
+                     Proceeding with fallback priority fee."
+                );
+                vec![]
+            }
+        };
     let mut result = vec![];
     let mut max_base_fee = 0.0;
     let mut time_factor = params.max_time_factor;
@@ -283,19 +294,14 @@ async fn collect_rewards<T: Transport + Send + Sync>(
                 )
                 .await?;
 
-            if fee_history.reward.is_none() {
-                break;
-            }
-
-            let fee_history_reward = fee_history.reward.unwrap();
-            for reward in &fee_history_reward {
-                for i in 0..=params.max_reward_percentile {
-                    let reward = reward[i].low_u64();
-                    if reward > 0 {
-                        rewards.push(reward);
-                    }
-                }
-            }
+            let fee_history_reward = fee_history.reward.context("missing reward in response")?;
+            rewards.extend(
+                fee_history_reward
+                    .iter()
+                    .flatten()
+                    .map(U256::low_u64)
+                    .filter(|reward| *reward > 0),
+            );
             if fee_history_reward.len() < block_count {
                 break;
             }
