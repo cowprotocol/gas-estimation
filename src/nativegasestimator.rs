@@ -327,7 +327,6 @@ fn max_block_count(gas_used_ratio: &[f64], last_index: usize, need_blocks: usize
         "max_block_count invalid input"
     );
     Ok((0..std::cmp::min(last_index + 1, need_blocks))
-        .into_iter()
         .take_while(|i| {
             !(gas_used_ratio[last_index - i] == 0.0 || gas_used_ratio[last_index - i] > 0.9)
         })

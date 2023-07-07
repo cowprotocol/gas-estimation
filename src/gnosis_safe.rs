@@ -4,7 +4,7 @@
 use super::{linear_interpolation, GasPrice1559, GasPriceEstimating, Transport};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use serde_with::rust::display_fromstr;
+use serde_with::{serde_as, DisplayFromStr};
 use std::{convert::TryInto, time::Duration};
 
 /// The default uris at which the gas station api is available under.
@@ -23,19 +23,20 @@ pub fn api_url_from_network_id(network_id: &str) -> Option<&'static str> {
 
 /// Gas prices in wei retrieved from the gas station. This is a result from the
 /// API call.
+#[serde_as]
 #[derive(Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GasPrices {
     pub last_update: String,
-    #[serde(with = "display_fromstr")]
+    #[serde_as(as = "DisplayFromStr")]
     pub lowest: f64,
-    #[serde(with = "display_fromstr")]
+    #[serde_as(as = "DisplayFromStr")]
     pub safe_low: f64,
-    #[serde(with = "display_fromstr")]
+    #[serde_as(as = "DisplayFromStr")]
     pub standard: f64,
-    #[serde(with = "display_fromstr")]
+    #[serde_as(as = "DisplayFromStr")]
     pub fast: f64,
-    #[serde(with = "display_fromstr")]
+    #[serde_as(as = "DisplayFromStr")]
     pub fastest: f64,
 }
 
