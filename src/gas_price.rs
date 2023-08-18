@@ -71,12 +71,20 @@ impl GasPrice1559 {
 
 impl std::fmt::Display for GasPrice1559 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let format_unit = |wei| {
+            let gwei: f64 = wei / 1e9;
+            if gwei >= 1.0 {
+                format!("{:.2} Gwei", gwei)
+            } else {
+                format!("{wei} wei")
+            }
+        };
         write!(
             f,
-            "{{ max_fee: {:.9} gwei, max_priority_fee: {:.9} gwei, base_fee: {:.9} gwei }}",
-            self.max_fee_per_gas / 1e9,
-            self.max_priority_fee_per_gas / 1e9,
-            self.base_fee_per_gas / 1e9,
+            "{{ max_fee: {}, max_priority_fee: {}, base_fee: {} }}",
+            format_unit(self.max_fee_per_gas),
+            format_unit(self.max_priority_fee_per_gas),
+            format_unit(self.base_fee_per_gas),
         )
     }
 }
