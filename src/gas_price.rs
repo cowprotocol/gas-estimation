@@ -73,7 +73,7 @@ impl std::fmt::Display for GasPrice1559 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "max_fee_per_gas: {:.9} gwei, max_priority_fee_per_gas: {:.9} gwei, base_fee_per_gas: {:.9} gwei",
+            "{{ max_fee: {:.9} gwei, max_priority_fee: {:.9} gwei, base_fee: {:.9} gwei }}",
             self.max_fee_per_gas / 1e9,
             self.max_priority_fee_per_gas / 1e9,
             self.base_fee_per_gas / 1e9,
