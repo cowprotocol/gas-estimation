@@ -8,7 +8,6 @@ pub mod eth_node;
 pub mod ethgasstation;
 pub mod gas_price;
 pub mod gasnow;
-pub mod gnosis_safe;
 mod linear_interpolation;
 #[cfg(feature = "web3_")]
 pub mod nativegasestimator;
@@ -19,7 +18,6 @@ pub use blocknative::BlockNative;
 pub use ethgasstation::EthGasStation;
 pub use gas_price::GasPrice1559;
 pub use gasnow::GasNowGasStation;
-pub use gnosis_safe::GnosisSafeGasStation;
 pub use priority::PriorityGasPriceEstimating;
 
 use anyhow::Result;
