@@ -5,7 +5,6 @@
 pub mod blocknative;
 #[cfg(feature = "web3_")]
 pub mod eth_node;
-pub mod ethgasstation;
 pub mod gas_price;
 pub mod gasnow;
 mod linear_interpolation;
@@ -15,7 +14,6 @@ pub mod priority;
 
 #[cfg(feature = "tokio_")]
 pub use blocknative::BlockNative;
-pub use ethgasstation::EthGasStation;
 pub use gas_price::GasPrice1559;
 pub use gasnow::GasNowGasStation;
 pub use priority::PriorityGasPriceEstimating;
