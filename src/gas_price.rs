@@ -20,7 +20,7 @@ impl GasPrice1559 {
         std::cmp::min_by(
             self.max_fee_per_gas,
             self.max_priority_fee_per_gas + self.base_fee_per_gas,
-            |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
+            |a, b| a.total_cmp(b),
         )
     }
 
