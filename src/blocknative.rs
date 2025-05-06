@@ -190,7 +190,7 @@ fn estimate_with_limits(
         //need to sort by confidence since Blocknative API does not guarantee sorted response
         block
             .estimated_prices
-            .sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap()); //change to total_cmp when stable
+            .sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
 
         //if confidence is 90%, point is calculated as 15s / (90% / 100%)
         let points = block
